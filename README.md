@@ -17,6 +17,11 @@ Recursively search through groups and only return unique user objects. Requires 
 ```
 Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
 Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureADGroupMemberRecursive
+
+ObjectId                             DisplayName     UserPrincipalName             UserType
+--------                             -----------     -----------------             --------
+1a9a26f4-297a-4dec-95b3-e502ec8e9dfc NestedGroupUser NestedGroupUser@jonyschats.nl Member
+eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser       GroupUser@jonyschats.nl       Member
 ```
 
 #### Get-AzureADDirectoryRoleMemberRecursive
@@ -25,6 +30,11 @@ Recursively search through roles and only return unique user objects. Requires t
 ```
 Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
 Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get-AzureADDirectoryRoleMemberRecursive
+
+ObjectId                             DisplayName     UserPrincipalName             UserType
+--------                             -----------     -----------------             --------
+1a9a26f4-297a-4dec-95b3-e502ec8e9dfc NestedGroupUser NestedGroupUser@jonyschats.nl Member
+eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser       GroupUser@jonyschats.nl       Member
 ```
 
 ## Get-AzureADPrivilegedRolesMembers
