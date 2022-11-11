@@ -1,5 +1,5 @@
 # AzurePowerCommands
-Extra cmdlets to help with quering security related information from Azure
+Extra cmdlets to help with quering AzureAD related information from Azure
 
 # Usage
 ```
