@@ -39,7 +39,7 @@ ObjectId                             DisplayName UserPrincipalName  UserType
 ```
 
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself.
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Uses the roles "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
 
 ```
 Get-AzureADPrivilegedRolesOverview
