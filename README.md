@@ -10,6 +10,7 @@ Connect-AzureAD
 Connect-MsolService
 ```
 
+# Cmdlets and examples
 #### Get-AzureADGroupMemberRecursive
 Recursively search through groups and only return unique user objects. Requires the Get-AzureADGroup as input.
 
