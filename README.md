@@ -57,7 +57,7 @@ ObjectId                             DisplayName UserPrincipalName  UserType
 ```
 
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa)
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa).
 
 ```
 Get-AzureADPrivilegedRolesOverview
@@ -88,8 +88,8 @@ Get-AzureADDirectoryRoleOverview
 
 Role                 UserCount Members
 ----                 --------- -------
+Security Reader              2 {NestedGroupUser@jonyschats.nl, SecurityReader@jonyschats.nl}
 Global Reader                1 SecurityReader@jonyschats.nl
-Security Reader              1 SecurityReader@jonyschats.nl
 Global Administrator         1 0xjs@jonyschats.nl
 ```
 
