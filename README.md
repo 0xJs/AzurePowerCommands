@@ -17,6 +17,10 @@ Recursively search through groups and only return unique user objects. Requires 
 ```
 Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
 Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureADGroupMemberRecursive
+```
+
+```
+Get-AzureADGroup -ObjectId f5108639-9aca-4694-864e-c4e00186706b | Get-AzureADGroupMemberRecursive
 
 ObjectId                             DisplayName     UserPrincipalName             UserType
 --------                             -----------     -----------------             --------
@@ -30,11 +34,15 @@ Recursively search through roles and only return unique user objects. Requires t
 ```
 Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
 Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get-AzureADDirectoryRoleMemberRecursive
+```
+
+```
+Get-AzureADDirectoryRole -ObjectId 598a6cfe-5d1a-42a7-81b6-76f4ab077152 | Get-AzureADDirectoryRoleMemberRecursive
 
 ObjectId                             DisplayName     UserPrincipalName             UserType
 --------                             -----------     -----------------             --------
 1a9a26f4-297a-4dec-95b3-e502ec8e9dfc NestedGroupUser NestedGroupUser@jonyschats.nl Member
-eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser       GroupUser@jonyschats.nl       Member
+fb8a7905-e32c-4431-9e66-2968013f924f SecurityReader  SecurityReader@jonyschats.nl  Member
 ```
 
 ## Get-AzureADPrivilegedRolesMembers
@@ -49,22 +57,27 @@ ObjectId                             DisplayName UserPrincipalName  UserType
 ```
 
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. 
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa)
 
 ```
 Get-AzureADPrivilegedRolesOverview
 
-Role                             UserCount Members
-----                             --------- -------
-Global Administrator                     1 0xjs@jonyschats.nl
-Billing administrator                    0
-Helpdesk administrator                   0
-User administrator                       0
-Authentication administrator             0
-Exchange Administrator                   0
-Security administrator                   0
-SharePoint administrator                 0
-Conditional Access administrator         0
+Role                                    UserCount Members
+----                                    --------- -------
+Global Administrator                            1 0xjs@jonyschats.nl
+Privileged Role Administrator                   0
+Privileged authentication administrator         0
+Password administrator                          0
+User administrator                              0
+SharePoint administrator                        0
+Security administrator                          0
+Helpdesk administrator                          0
+Billing administrator                           0
+Authentication Administrator                    0
+Application administrator                       0
+Exchange administrator                          0
+Conditional Access administrator                0
+Cloud application administrator                 0
 ```
 
 ## Get-AzureADDirectoryRoleOverview
