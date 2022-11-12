@@ -90,7 +90,7 @@ Required Dependencies: Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember,
 Optional Dependencies: None
 
 .DESCRIPTION
-Recursively search through privileged roles and only return unique user objects. Uses the roles "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
+Recursively search through privileged roles and only return unique user objects.
 
 .EXAMPLE
 Get-AzureADPrivilegedRolesMembers
@@ -98,7 +98,7 @@ Get-AzureADPrivilegedRolesMembers
 #>
     Begin{
         If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
-		$AdminRoles = "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
+		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
 		$Output = @()
     }
 	
@@ -138,7 +138,7 @@ Get-AzureADPrivilegedRolesOverview
 #>
     Begin{
         If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
-		$AdminRoles = "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
+		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
 		$Output = @()
     }
 	
