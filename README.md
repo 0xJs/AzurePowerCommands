@@ -38,7 +38,7 @@ eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser       GroupUser@jonyschats.nl    
 ```
 
 ## Get-AzureADPrivilegedRolesMembers
-Recursively search through privileged roles and only return unique user objects. Uses the roles "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
+Recursively search through privileged roles and only return unique user objects.
 
 ```
 Get-AzureADPrivilegedRolesMembers
@@ -49,7 +49,7 @@ ObjectId                             DisplayName UserPrincipalName  UserType
 ```
 
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Uses the roles "Security administrator", "Exchange Administrator", "Global administrator", "Conditional Access administrator", "SharePoint administrator", "Helpdesk administrator", "Billing administrator", "User administrator", "Authentication administrator"
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. 
 
 ```
 Get-AzureADPrivilegedRolesOverview
