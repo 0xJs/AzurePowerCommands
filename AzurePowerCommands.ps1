@@ -8,6 +8,9 @@ Optional Dependencies: None
 .DESCRIPTION
 Recursively search through groups and only return unique user objects. Requires the Get-AzureADGroup as input.
 
+.PARAMETER ReturnGroups
+Return group objects instead of user objects.
+
 .EXAMPLE
 Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
 
@@ -17,24 +20,59 @@ Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureA
 	[cmdletbinding()]
 	param(
 	[parameter(Mandatory=$True,ValueFromPipeline=$true)]
-	$AzureGroup
+	$AzureGroup,
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnGroups
 	)
 		Begin{
-			If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
+			# Check if Azure AD is loaded
+			If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+				Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+				break
+			}
+			
+			# Check connection with AzureAD
+			try {
+				$var = Get-AzureADTenantDetail
+			}
+			catch {
+				Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+				break
+			}
+		
 			$Output = @()
 		}
+		
 		Process {
 			Write-Verbose -Message "Enumerating $($AzureGroup.DisplayName)"
 			$Members = Get-AzureADGroupMember -ObjectId $AzureGroup.ObjectId -All $true
-			$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
-			$Output += $UserMembers
 			
-			$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-			If($GroupMembers){
-				$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
+			if ($ReturnGroups){
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
 				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnGroups -AzureGroup $_}
+					$Output += $UserMembers
+				}
 			}
+			else {
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
+				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
+					$Output += $UserMembers
+				}
+			}
+			
+			
+			
 		}
+		
 		end {
 			Return $Output | Sort-Object -Unique
 		}
@@ -50,6 +88,9 @@ Optional Dependencies: None
 .DESCRIPTION
 Recursively search through roles and only return unique user objects. Requires the Get-AzureADDirectoryRole as input.
 
+.PARAMETER ReturnGroups
+Return group objects instead of user objects.
+
 .EXAMPLE
 Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
 
@@ -59,24 +100,56 @@ Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get
 	[cmdletbinding()]
 	param(
 	[parameter(Mandatory=$True,ValueFromPipeline=$true)]
-	$RoleGroup
+	$RoleGroup,
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnGroups
 	)
 		Begin{
-			If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
+			# Check if Azure AD is loaded
+			If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+				Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+				break
+			}
+			
+			# Check connection with AzureAD
+			try {
+				$var = Get-AzureADTenantDetail
+			}
+			catch {
+				Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+				break
+			}
+		
 			$Output = @()
 		}
+		
 		Process {
 			Write-Verbose -Message "Enumerating $($RoleGroup.DisplayName)"
 			$Members = Get-AzureADDirectoryRoleMember -ObjectId $RoleGroup.ObjectId
-			$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
-			$Output += $UserMembers
 			
-			$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-			If($GroupMembers){
-				$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
+			if ($ReturnGroups){
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
 				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnGroups -AzureGroup $_}
+					$Output += $UserMembers
+				}
+			}
+			else {
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
+				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
+					$Output += $UserMembers
+				}
 			}
 		}
+		
 		end {
 			Return $Output | Sort-Object -Unique
 		}
@@ -92,12 +165,36 @@ Optional Dependencies: None
 .DESCRIPTION
 Recursively search through privileged roles and only return unique user objects.
 
+.PARAMETER ReturnGroups
+Return group objects instead of user objects.
+
 .EXAMPLE
 Get-AzureADPrivilegedRolesMembers
 
 #>
+	[cmdletbinding()]
+	param(
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnGroups
+	)
+	
     Begin{
-        If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
+		# Check if Azure AD is loaded
+		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+			break
+		}
+        
+		# Check connection with AzureAD
+		try {
+			$var = Get-AzureADTenantDetail
+		}
+		catch {
+			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+			break
+		}
+		
 		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
 		$Output = @()
     }
@@ -109,10 +206,14 @@ Get-AzureADPrivilegedRolesMembers
 			
 			# If the role is populated
 			if ($AdminRoleData -ne $null){
-				
-				# Retrieve members of the AdminRole
-				$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-				$Output += $AdminRoleMembers
+				if ($ReturnGroups){
+					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
+					$Output += $AdminRoleMembers
+				}
+				else {
+					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
+					$Output += $AdminRoleMembers
+				}
 			}
 		}
 	}
@@ -137,7 +238,21 @@ Get-AzureADPrivilegedRolesOverview
 
 #>
     Begin{
-        If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
+		# Check if Azure AD is loaded
+		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+			break
+		}
+        
+		# Check connection with AzureAD
+		try {
+			$var = Get-AzureADTenantDetail
+		}
+		catch {
+			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+			break
+		}
+		
 		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
 		$Output = @()
     }
@@ -151,19 +266,28 @@ Get-AzureADPrivilegedRolesOverview
 			if ($AdminRoleData -ne $null){
 				
 				# Retrieve members of the AdminRole
-				$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-				$AdminRoleMembersCount = $AdminRoleMembers | Sort-Object -Unique | Measure-Object
+				$AdminRoleMembersUsers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
+				$AdminRoleMembersUsersCount = $AdminRoleMembersUsers | Sort-Object -Unique | Measure-Object
+				
+				$AdminRoleMembersGroups = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
+				$AdminRoleMembersGroupsCount = $AdminRoleMembersGroups | Sort-Object -Unique | Measure-Object
+				
+				$GroupOwners = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups | Get-AzureADGroupOwner
 				
 				$item = New-Object PSObject
 				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRoleData.DisplayName
-				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $AdminRoleMembersCount.Count
-				$item | Add-Member -type NoteProperty -Name 'Members' -Value $AdminRoleMembers.UserPrincipalName
+				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $AdminRoleMembersUsersCount.Count
+				$item | Add-Member -type NoteProperty -Name 'Users' -Value $AdminRoleMembersUsers.UserPrincipalName
+				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value $AdminRoleMembersGroupsCount.Count
+				$item | Add-Member -type NoteProperty -Name 'Groups' -Value $AdminRoleMembersGroups.DisplayName
+				$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName				
 				$Output += $item
 			}
 			else {
 				$item = New-Object PSObject
 				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRole
 				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value "0"
+				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value "0"
 				$Output += $item
 			}
 		}
@@ -189,7 +313,21 @@ Get-AzureADDirectoryRoleOverview
 
 #>
     Begin{
-        If(-not(Get-AzureADCurrentSessionInfo)){Connect-AzureAD}
+        		# Check if Azure AD is loaded
+		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+			break
+		}
+        
+		# Check connection with AzureAD
+		try {
+			$var = Get-AzureADTenantDetail
+		}
+		catch {
+			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+			break
+		}
+		
 		$Output = @()
     }
 	
@@ -259,7 +397,21 @@ Get detailed MFA configuration data for all users of privileges roles
 	$Detailed
 	)
 		Begin{
-			If(-not(Get-MsolUser)){Connect-MsolService}
+			# Check if MSOnline is loaded
+			If(-not(Get-Command *Get-MsolCompanyInformation*)){
+				Write-Host -ForegroundColor Red "MSOnline Module not imported, stopping"
+				break
+			}
+			
+			# Check connection with MSOnline
+			try {
+				$var = Get-MsolDomain -ErrorAction Stop > $null
+			}
+			catch {
+				Write-Host -ForegroundColor Red "You're not connected with MSOnline, Connect with Connect-MsolService"
+				break
+			}
+		
 			$Output = @()
 		}
 		
