@@ -122,3 +122,7 @@ PhoneAppNotification : True
 Registered Email     : fakeemail@jonyschats.nl
 Registered Phone     : +31 06123456789
 ```
+
+# To-Do
+- Update the cmdlets output examples on this github page
+- Rewrite the cmdlets so they always return all objects, filter based on parameter. Then looping through the same commands and roles isn't neccesary to built overviews or retrieve all priviliged identities
