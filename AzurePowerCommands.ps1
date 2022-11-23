@@ -11,6 +11,9 @@ Recursively search through groups and only return unique user objects. Requires 
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
+.PARAMETER ServicePrincipals
+Return service principals instead of user objects.
+
 .EXAMPLE
 Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
 
@@ -23,7 +26,10 @@ Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureA
 	$AzureGroup,
 	[Parameter(Mandatory = $false)]
 	[Switch]
-	$ReturnGroups
+	$ReturnGroups,
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnServicePrincipals
 	)
 		Begin{
 			# Check if Azure AD is loaded
@@ -55,6 +61,16 @@ Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureA
 				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
 				If($GroupMembers){
 					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnGroups -AzureGroup $_}
+					$Output += $UserMembers
+				}
+			}
+			elseif ($ReturnServicePrincipals) {
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'ServicePrincipal'}
+				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnServicePrincipals -AzureGroup $_}
 					$Output += $UserMembers
 				}
 			}
@@ -91,6 +107,9 @@ Recursively search through roles and only return unique user objects. Requires t
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
+.PARAMETER ServicePrincipals
+Return service principals instead of user objects.
+
 .EXAMPLE
 Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
 
@@ -103,7 +122,10 @@ Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get
 	$RoleGroup,
 	[Parameter(Mandatory = $false)]
 	[Switch]
-	$ReturnGroups
+	$ReturnGroups,
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnServicePrincipals
 	)
 		Begin{
 			# Check if Azure AD is loaded
@@ -138,6 +160,16 @@ Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get
 					$Output += $UserMembers
 				}
 			}
+			elseif ($ReturnServicePrincipals) {
+				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'ServicePrincipal'}
+				$Output += $UserMembers
+				
+				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
+				If($GroupMembers){
+					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnServicePrincipals -AzureGroup $_}
+					$Output += $UserMembers
+				}
+			}
 			else {
 				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
 				$Output += $UserMembers
@@ -168,6 +200,9 @@ Recursively search through privileged roles and only return unique user objects.
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
+.PARAMETER ServicePrincipals
+Return service principals instead of user objects.
+
 .EXAMPLE
 Get-AzureADPrivilegedRolesMembers
 
@@ -176,7 +211,10 @@ Get-AzureADPrivilegedRolesMembers
 	param(
 	[Parameter(Mandatory = $false)]
 	[Switch]
-	$ReturnGroups
+	$ReturnGroups,
+	[Parameter(Mandatory = $false)]
+	[Switch]
+	$ReturnServicePrincipals
 	)
 	
     Begin{
@@ -208,6 +246,10 @@ Get-AzureADPrivilegedRolesMembers
 			if ($AdminRoleData -ne $null){
 				if ($ReturnGroups){
 					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
+					$Output += $AdminRoleMembers
+				}
+				elseif ($ReturnServicePrincipals) {
+					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
 					$Output += $AdminRoleMembers
 				}
 				else {
@@ -271,16 +313,26 @@ Get-AzureADPrivilegedRolesOverview
 				
 				$AdminRoleMembersGroups = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
 				$AdminRoleMembersGroupsCount = $AdminRoleMembersGroups | Sort-Object -Unique | Measure-Object
-				
 				$GroupOwners = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups | Get-AzureADGroupOwner
+				
+				$AdminRoleMembersSPs = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
+				$AdminRoleMembersSPsCount = $AdminRoleMembersSPs | Sort-Object -Unique | Measure-Object
+				$ServicePrincipalOwners = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
 				
 				$item = New-Object PSObject
 				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRoleData.DisplayName
+				
 				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $AdminRoleMembersUsersCount.Count
 				$item | Add-Member -type NoteProperty -Name 'Users' -Value $AdminRoleMembersUsers.UserPrincipalName
+				
 				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value $AdminRoleMembersGroupsCount.Count
 				$item | Add-Member -type NoteProperty -Name 'Groups' -Value $AdminRoleMembersGroups.DisplayName
-				$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName				
+				$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName
+				
+				$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value $AdminRoleMembersSPsCount.Count
+				$item | Add-Member -type NoteProperty -Name 'SPs' -Value $AdminRoleMembersSPs.DisplayName
+				$item | Add-Member -type NoteProperty -Name 'SPsOwners' -Value $ServicePrincipalOwners.UserPrincipalName
+				
 				$Output += $item
 			}
 			else {
@@ -288,6 +340,7 @@ Get-AzureADPrivilegedRolesOverview
 				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRole
 				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value "0"
 				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value "0"
+				$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value "0"
 				$Output += $item
 			}
 		}
@@ -334,17 +387,44 @@ Get-AzureADDirectoryRoleOverview
 	Process {
 		$AzureADRoles = Get-AzureADDirectoryRole
 
-		foreach ($AzureADRole in $AzureADRoles) {
-			Write-Verbose -Message "Enumerating $($AzureADRole.DisplayName)"
+		foreach ($RoleData in $AzureADRoles) {
+			Write-Verbose -Message "Enumerating $($RoleData.DisplayName)"
 				
 			# Retrieve members of the AdminRole
-			$RoleMembers = Get-AzureADDirectoryRole -ObjectId $AzureADRole.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-			$RoleMembersCount = $RoleMembers | Sort-Object -Unique | Measure-Object
+			#$RoleMembers = Get-AzureADDirectoryRole -ObjectId $AzureADRole.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
+			#$RoleMembersCount = $RoleMembers | Sort-Object -Unique | Measure-Object
+			#
+			#$item = New-Object PSObject
+			#$item | Add-Member -type NoteProperty -Name 'Role' -Value $AzureADRole.DisplayName
+			#$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $RoleMembersCount.Count
+			#$item | Add-Member -type NoteProperty -Name 'Members' -Value $RoleMembers.UserPrincipalName
+			#$Output += $item
+			
+			$RoleMembersUsers = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
+			$RoleMembersUsersCount = $RoleMembersUsers | Sort-Object -Unique | Measure-Object
+			
+			$RoleMembersGroups = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
+			$RoleMembersGroupsCount = $RoleMembersGroups | Sort-Object -Unique | Measure-Object
+			$GroupOwners = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups | Get-AzureADGroupOwner
+			
+			$RoleMembersSPs = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
+			$RoleMembersSPsCount = $RoleMembersSPs | Sort-Object -Unique | Measure-Object
+			$ServicePrincipalOwners = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
 			
 			$item = New-Object PSObject
-			$item | Add-Member -type NoteProperty -Name 'Role' -Value $AzureADRole.DisplayName
-			$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $RoleMembersCount.Count
-			$item | Add-Member -type NoteProperty -Name 'Members' -Value $RoleMembers.UserPrincipalName
+			$item | Add-Member -type NoteProperty -Name 'Role' -Value $RoleData.DisplayName
+			
+			$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $RoleMembersUsersCount.Count
+			$item | Add-Member -type NoteProperty -Name 'Users' -Value $RoleMembersUsers.UserPrincipalName
+			
+			$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value $RoleMembersGroupsCount.Count
+			$item | Add-Member -type NoteProperty -Name 'Groups' -Value $RoleMembersGroups.DisplayName
+			$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName
+			
+			$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value $RoleMembersSPsCount.Count
+			$item | Add-Member -type NoteProperty -Name 'SPs' -Value $RoleMembersSPs.DisplayName
+			$item | Add-Member -type NoteProperty -Name 'SPsOwners' -Value $ServicePrincipalOwners.UserPrincipalName
+			
 			$Output += $item
 			}
 	}
