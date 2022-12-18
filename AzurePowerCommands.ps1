@@ -390,16 +390,6 @@ Get-AzureADDirectoryRoleOverview
 		foreach ($RoleData in $AzureADRoles) {
 			Write-Verbose -Message "Enumerating $($RoleData.DisplayName)"
 				
-			# Retrieve members of the AdminRole
-			#$RoleMembers = Get-AzureADDirectoryRole -ObjectId $AzureADRole.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-			#$RoleMembersCount = $RoleMembers | Sort-Object -Unique | Measure-Object
-			#
-			#$item = New-Object PSObject
-			#$item | Add-Member -type NoteProperty -Name 'Role' -Value $AzureADRole.DisplayName
-			#$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $RoleMembersCount.Count
-			#$item | Add-Member -type NoteProperty -Name 'Members' -Value $RoleMembers.UserPrincipalName
-			#$Output += $item
-			
 			$RoleMembersUsers = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
 			$RoleMembersUsersCount = $RoleMembersUsers | Sort-Object -Unique | Measure-Object
 			
@@ -431,6 +421,89 @@ Get-AzureADDirectoryRoleOverview
 
 	end {
         Return $Output | Sort-Object -Property UserCount -Descending
+    }
+}
+
+Function Get-AzureADPrivilegedObjects{
+<#
+.SYNOPSIS
+Author: Jony Schats - 0xjs
+Required Dependencies: Get-AzureADPrivilegedRolesMembers, Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
+Optional Dependencies: None
+
+.DESCRIPTION
+Recursively search through privileged roles and return users and service principal identities and their owners
+
+.EXAMPLE
+Get-AzureADPrivilegedObjects
+
+#>
+	[cmdletbinding()]
+	param(
+
+	)
+	
+    Begin{
+		# Check if Azure AD is loaded
+		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
+			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
+			break
+		}
+        
+		# Check connection with AzureAD
+		try {
+			$var = Get-AzureADTenantDetail
+		}
+		catch {
+			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
+			break
+		}
+		
+		$AllUsers = @()
+		$AllServicePrincipals = @()
+		$Output = @()
+    }
+	
+	Process {
+		# Retrieving privileged users member of role
+		$Users = Get-AzureADPrivilegedRolesMembers
+		$AllUsers += $users
+		$UsersCount = ($Users | Measure-Object).count
+		Write-Host "[+] Discovered $UsersCount users"
+		
+		# Retrieving privileged group owners
+		$GroupOwners = Get-AzureADPrivilegedRolesMembers -ReturnGroup | Get-AzureADGroupOwner
+		$AllUsers += $GroupOwners | Where-Object -Property ObjectType -Match User
+		$AllServicePrincipals += $GroupOwners | Where-Object -Property ObjectType -Match ServicePrincipal
+		$CountGroupOwners = ($Users | Measure-Object).count
+		Write-Host "[+] Discovered $CountGroupOwners group owners"
+		
+		# Retrieving privileged service principals
+		$ServicePrincipals = Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals
+		$AllServicePrincipals += $ServicePrincipals
+		$CountServicePrincipals = ($ServicePrincipals | Measure-Object).count
+		Write-Host "[+] Discovered $CountServicePrincipals service principals"
+		
+		# Retrieving privileged service principal owners
+		$ServicePrincipalOwners = Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
+		$AllUsers += $ServicePrincipalOwners
+		$CountServicePrincipalOwners = ($ServicePrincipalOwners | Measure-Object).count
+		Write-Host "[+] Discovered $CountServicePrincipalOwners service principal owners"
+		
+		$CountAllUsers = ($AllUsers | Measure-Object).count
+		Write-Host "[+] Found $CountAllUsers highly privileged users"
+		$CountAllServicePrincipals = ($AllServicePrincipals | Measure-Object).count
+		Write-Host "[+] Found $CountAllServicePrincipals highly privileged service principals"
+		
+		$AllUsers = $AllUsers | Sort-Object -Unique
+		$AllServicePrincipals = $AllServicePrincipals | Sort-Object -Unique
+		
+		$Output += $AllUsers
+		$Output += $AllServicePrincipals
+	}
+
+	end {
+		return $Output | ft -Force
     }
 }
 
