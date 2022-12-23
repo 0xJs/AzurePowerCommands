@@ -97,7 +97,7 @@ Global Administrator         1 0xjs@jonyschats.nl
 Get MFA configuration data for the user. Requires a user as input.
 
 ```
-Get-AzureADUser | Get-AzureADUserMFAConfiguration
+Get-AzureADUser -all $true | Get-AzureADUserMFAConfiguration
 
 UserPrincipalName             MFA Configured MFA Default
 -----------------             -------------- -----------
