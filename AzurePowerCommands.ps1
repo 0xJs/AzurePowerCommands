@@ -424,7 +424,7 @@ Get-AzureADDirectoryRoleOverview
     }
 }
 
-Function Get-AzureADPrivilegedIdentities{
+Function Get-AzureADPrivilegedObjects{
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
@@ -435,7 +435,7 @@ Optional Dependencies: None
 Recursively search through privileged roles and return users and service principal identities and their owners
 
 .EXAMPLE
-Get-AzureADPrivilegedIdentities
+Get-AzureADPrivilegedObjects
 
 #>
 	[cmdletbinding()]
