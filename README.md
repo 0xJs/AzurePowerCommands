@@ -46,7 +46,7 @@ fb8a7905-e32c-4431-9e66-2968013f924f SecurityReader  SecurityReader@jonyschats.n
 ```
 
 ## Get-AzureADPrivilegedRolesMembers
-Recursively search through privileged roles and only return unique user objects.
+Recursively search through privileged roles and return user objects. Use `ReturnServicePrincipals` or `ReturnGroups` to return privileged Serviceprincipals/groups.
 
 ```
 Get-AzureADPrivilegedRolesMembers
@@ -56,44 +56,58 @@ ObjectId                             DisplayName UserPrincipalName  UserType
 766787e8-82c1-4062-bfa9-5d4a4ca300f3 0xjs        0xjs@jonyschats.nl Member
 ```
 
+```
+Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals
+
+ObjectId                             AppId                                DisplayName
+--------                             -----                                -----------
+5530a9cf-a45a-4662-9179-eaa8d9089605 1a93dd32-5ade-4656-9ada-6a285676eb92 Test_enterpriseapp
+```
+
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa).
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and thier owners! 
+
+Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa).
 
 ```
-Get-AzureADPrivilegedRolesOverview
+Get-AzureADPrivilegedRolesOverview | ft
 
-Role                                    UserCount Members
-----                                    --------- -------
-Global Administrator                            1 0xjs@jonyschats.nl
-Privileged Role Administrator                   0
-Privileged authentication administrator         0
-Password administrator                          0
-User administrator                              0
-SharePoint administrator                        0
-Security administrator                          0
-Helpdesk administrator                          0
-Billing administrator                           0
-Authentication Administrator                    0
-Application administrator                       0
-Exchange administrator                          0
-Conditional Access administrator                0
-Cloud application administrator                 0
+Role                                    UserCount Users                   GroupCount Groups        GroupOwners                  SPsCount SPs                SPsOwners
+----                                    --------- -----                   ---------- ------        -----------                  -------- ---                ---------
+Authentication Administrator                    1 GroupUser@jonyschats.nl          1 Administrator GroupOwnerUser@jonyschats.nl        1 Test_enterpriseapp ServicePrincipalOwner@jonyschats.nl
+Global Administrator                            1 0xjs@jonyschats.nl               0                                                   0
+Privileged Role Administrator                   0                                  0                                                   0
+Privileged authentication administrator         0                                  0                                                   0
+Password administrator                          0                                  0                                                   0
+User Administrator                              0                                  0                                                   0
+SharePoint administrator                        0                                  0                                                   0
+Security administrator                          0                                  0                                                   0
+Cloud application administrator                 0                                  0                                                   0
+Billing administrator                           0                                  0                                                   0
+Application administrator                       0                                  0                                                   0
+Helpdesk administrator                          0                                  0                                                   0
+Exchange administrator                          0                                  0                                                   0
+Conditional Access administrator                0                                  0                                                   0
 ```
 
 ## Get-AzureADDirectoryRoleOverview
-Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself.
+Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and thier owners!
 
 ```
 Get-AzureADDirectoryRoleOverview
 
-Role                 UserCount Members
-----                 --------- -------
-Security Reader              2 {NestedGroupUser@jonyschats.nl, SecurityReader@jonyschats.nl}
-Global Reader                1 SecurityReader@jonyschats.nl
-Global Administrator         1 0xjs@jonyschats.nl
+Role                         UserCount Users                                                         GroupCount Groups                   GroupOwners                  SPsCount SPs                                                     SPsOwners
+----                         --------- -----                                                         ---------- ------                   -----------                  -------- ---                                                     ---------
+Security Reader                      2 {NestedGroupUser@jonyschats.nl, SecurityReader@jonyschats.nl}          1 Security Reader AD Group                                     0
+Global Reader                        1 SecurityReader@jonyschats.nl                                           0                                                              0
+Global Administrator                 1 0xjs@jonyschats.nl                                                     0                                                              0
+Authentication Administrator         1 GroupUser@jonyschats.nl                                                1 Administrator            GroupOwnerUser@jonyschats.nl        1 Test_enterpriseapp                                      ServicePrincipalOwner@jonyschats.nl
+User Administrator                   0                                                                        0                                                              0
+Directory Readers                    0                                                                        0                                                              2 {MicrosoftAzureActiveAuthn, Microsoft.Azure.SyncFabric}
 ```
 
-## Get-AzureADPrivilegedIdentities
+## Get-AzureADPrivilegedObjects
+Recursively search through privileged roles and return users and service principal identities and their owners
 
 ```
 Get-AzureADPrivilegedObjects
@@ -129,7 +143,6 @@ GroupUser@jonyschats.nl                 True Microsoft Authenticator
 SecurityReader@jonyschats.nl            True Authenticator
 ```
 
-
 ```
 Get-MsolUser -ObjectId 766787e8-82c1-4062-bfa9-5d4a4ca300f3 | Get-AzureADUserMFAConfiguration -Detailed
 
@@ -151,5 +164,4 @@ Get-AzureADPrivilegedRolesMembers | Get-AzureADUserMFAConfiguration
 ```
 
 # To-Do
-- Update the cmdlets output examples on this github page
 - Rewrite the cmdlets so they always return all objects, filter based on parameter. Then looping through the same commands and roles isn't neccesary to built overviews or retrieve all priviliged identities
