@@ -93,6 +93,28 @@ Global Reader                1 SecurityReader@jonyschats.nl
 Global Administrator         1 0xjs@jonyschats.nl
 ```
 
+## Get-AzureADPrivilegedIdentities
+
+```
+Get-AzureADPrivilegedObjects
+
+[+] Discovered 2 users
+[+] Discovered 2 group owners
+[+] Discovered 1 service principals
+[+] Discovered 1 service principal owners
+[+] Found 4 highly privileged users
+[+] Found 2 highly privileged service principals
+
+ObjectId                             DisplayName              UserPrincipalName                   UserType
+--------                             -----------              -----------------                   --------
+2cc999ae-fe8e-4ce9-a18a-309d68f5bce2 GroupOwnerUser           GroupOwnerUser@jonyschats.nl        Member
+59b28e90-d96b-410b-acc6-fa9ee823bfbd ServicePrincipalOwner    ServicePrincipalOwner@jonyschats.nl Member
+766787e8-82c1-4062-bfa9-5d4a4ca300f3 0xjs                     0xjs@jonyschats.nl                  Member
+eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser                GroupUser@jonyschats.nl             Member
+5530a9cf-a45a-4662-9179-eaa8d9089605 Test_enterpriseapp
+5fef25d5-9886-42df-9d98-de37f6ffd299 Test_enterpriseapp_owner
+```
+
 ## Get-AzureADUserMFAConfiguration
 Get MFA configuration data for the user. Requires a user as input.
 
