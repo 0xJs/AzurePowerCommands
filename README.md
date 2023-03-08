@@ -65,7 +65,7 @@ ObjectId                             AppId                                Displa
 ```
 
 ## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and thier owners! 
+Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and their owners! 
 
 Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa).
 
