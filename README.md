@@ -91,7 +91,7 @@ Conditional Access administrator                0                               
 ```
 
 ## Get-AzureADDirectoryRoleOverview
-Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and thier owners!
+Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and their owners!
 
 ```
 Get-AzureADDirectoryRoleOverview
