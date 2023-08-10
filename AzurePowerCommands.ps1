@@ -475,7 +475,7 @@ Get-AzureADPrivilegedObjects
 		$GroupOwners = Get-AzureADPrivilegedRolesMembers -ReturnGroup | Get-AzureADGroupOwner
 		$AllUsers += $GroupOwners | Where-Object -Property ObjectType -Match User
 		$AllServicePrincipals += $GroupOwners | Where-Object -Property ObjectType -Match ServicePrincipal
-		$CountGroupOwners = ($Users | Measure-Object).count
+		$CountGroupOwners = ($GroupOwners | Measure-Object).count
 		Write-Host "[+] Discovered $CountGroupOwners group owners"
 		
 		# Retrieving privileged service principals
