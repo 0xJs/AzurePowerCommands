@@ -233,7 +233,7 @@ Get-AzureADPrivilegedRolesMembers
 			break
 		}
 		
-		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
+		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator", "Authentication policy administrator", "Directory writers", "External identity provider administrator", "Hybrid identity administrator", "Identity governance administrator", "Intune Administrator", "License administrator", "Partner tier 1 support", "Partner tier 2 support"
 		$Output = @()
     }
 	
