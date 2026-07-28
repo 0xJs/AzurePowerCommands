@@ -1,167 +1,521 @@
 # AzurePowerCommands
-Extra cmdlets to help with quering AzureAD related information from Azure
 
-# Usage
-```
-. .\AzurePowerCommands.ps1
-Import-Module .\AzureAD.psd1
-Import-Module .\MSOnline.psd1
-Connect-AzureAD
-Connect-MsolService
-```
+Microsoft Graph PowerShell commands for reviewing Microsoft Entra ID groups, directory roles, privileged identities, owners, and MFA registration.
 
-# Cmdlets and examples
-#### Get-AzureADGroupMemberRecursive
-Recursively search through groups and only return unique user objects. Requires the Get-AzureADGroup as input.
+This project is the Microsoft Graph successor to the original AzureAD/MSOnline-based `AzurePowerCommands.ps1` script.
 
-```
-Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
-Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureADGroupMemberRecursive
-```
+> The examples in this README assume that the updated script is named `MgPowerCommands.ps1`.
 
-```
-Get-AzureADGroup -ObjectId f5108639-9aca-4694-864e-c4e00186706b | Get-AzureADGroupMemberRecursive
+## Features
 
-ObjectId                             DisplayName     UserPrincipalName             UserType
---------                             -----------     -----------------             --------
-1a9a26f4-297a-4dec-95b3-e502ec8e9dfc NestedGroupUser NestedGroupUser@jonyschats.nl Member
-eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser       GroupUser@jonyschats.nl       Member
-```
+- Recursively enumerate users, groups, and service principals in nested groups.
+- Recursively resolve members assigned to Microsoft Entra directory roles.
+- Identify members of selected privileged roles.
+- Generate role overviews including users, groups, service principals, and owners.
+- Build a consolidated list of highly privileged identities.
+- Report MFA registration, capability, registered methods, preferred methods, and legacy per-user MFA state.
+- Return normal PowerShell objects that can be filtered, exported, and processed further.
 
-#### Get-AzureADDirectoryRoleMemberRecursive
-Recursively search through roles and only return unique user objects. Requires the Get-AzureADDirectoryRole as input.
+## Requirements
 
-```
-Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
-Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get-AzureADDirectoryRoleMemberRecursive
+- Windows PowerShell 5.1 or PowerShell 7.
+- The [Microsoft Graph PowerShell SDK](https://learn.microsoft.com/powershell/microsoftgraph/installation).
+- A Microsoft Entra work or school account.
+- Administrative consent for the required Microsoft Graph delegated permissions.
+- A supported Microsoft Entra directory role when an API requires both Graph permissions and directory RBAC permissions.
+
+The legacy AzureAD, AzureADPreview, and MSOnline modules are not required.
+
+## Installation
+
+Install the Microsoft Graph PowerShell SDK:
+
+```powershell
+Install-Module Microsoft.Graph -Scope CurrentUser
 ```
 
-```
-Get-AzureADDirectoryRole -ObjectId 598a6cfe-5d1a-42a7-81b6-76f4ab077152 | Get-AzureADDirectoryRoleMemberRecursive
+Download and import `MgPowerCommands.ps1`:
 
-ObjectId                             DisplayName     UserPrincipalName             UserType
---------                             -----------     -----------------             --------
-1a9a26f4-297a-4dec-95b3-e502ec8e9dfc NestedGroupUser NestedGroupUser@jonyschats.nl Member
-fb8a7905-e32c-4431-9e66-2968013f924f SecurityReader  SecurityReader@jonyschats.nl  Member
+```powershell
+Import-Module .\MgPowerCommands.ps1 -Force
 ```
 
-## Get-AzureADPrivilegedRolesMembers
-Recursively search through privileged roles and return user objects. Use `ReturnServicePrincipals` or `ReturnGroups` to return privileged Serviceprincipals/groups.
+The script can also be dot-sourced:
 
-```
-Get-AzureADPrivilegedRolesMembers
-
-ObjectId                             DisplayName UserPrincipalName  UserType
---------                             ----------- -----------------  --------
-766787e8-82c1-4062-bfa9-5d4a4ca300f3 0xjs        0xjs@jonyschats.nl Member
+```powershell
+. .\MgPowerCommands.ps1
 ```
 
-```
-Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals
+Confirm that the public commands are available:
 
-ObjectId                             AppId                                DisplayName
---------                             -----                                -----------
-5530a9cf-a45a-4662-9179-eaa8d9089605 1a93dd32-5ade-4656-9ada-6a285676eb92 Test_enterpriseapp
+```powershell
+Get-Command -Name Get-Mg* -CommandType Function | Where-Object Source -Like '*MgPowerCommands*'
 ```
 
-## Get-AzureADPrivilegedRolesOverview
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and their owners! 
+## Connect to Microsoft Graph
 
-Took the roles described from [here](https://learn.microsoft.com/en-us/azure/active-directory/conditional-access/howto-conditional-access-policy-admin-mfa).
+The following delegated scopes cover all functionality in the script:
 
-```
-Get-AzureADPrivilegedRolesOverview | ft
+```powershell
+$Scopes = @(
+    'Directory.Read.All'
+    'AuditLog.Read.All'
+    'UserAuthenticationMethod.Read.All'
+    'Policy.Read.All'
+)
 
-Role                                    UserCount Users                   GroupCount Groups        GroupOwners                  SPsCount SPs                SPsOwners
-----                                    --------- -----                   ---------- ------        -----------                  -------- ---                ---------
-Authentication Administrator                    1 GroupUser@jonyschats.nl          1 Administrator GroupOwnerUser@jonyschats.nl        1 Test_enterpriseapp ServicePrincipalOwner@jonyschats.nl
-Global Administrator                            1 0xjs@jonyschats.nl               0                                                   0
-Privileged Role Administrator                   0                                  0                                                   0
-Privileged authentication administrator         0                                  0                                                   0
-Password administrator                          0                                  0                                                   0
-User Administrator                              0                                  0                                                   0
-SharePoint administrator                        0                                  0                                                   0
-Security administrator                          0                                  0                                                   0
-Cloud application administrator                 0                                  0                                                   0
-Billing administrator                           0                                  0                                                   0
-Application administrator                       0                                  0                                                   0
-Helpdesk administrator                          0                                  0                                                   0
-Exchange administrator                          0                                  0                                                   0
-Conditional Access administrator                0                                  0                                                   0
+Connect-MgGraph -Scopes $Scopes
 ```
 
-## Get-AzureADDirectoryRoleOverview
-Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself. Also checks for groups, serviceprincipals and their owners!
+The scopes are used as follows:
 
-```
-Get-AzureADDirectoryRoleOverview
+| Scope | Used for |
+|---|---|
+| `Directory.Read.All` | Users, groups, service principals, owners, directory roles, and role members |
+| `AuditLog.Read.All` | MFA registration information from `userRegistrationDetails` |
+| `UserAuthenticationMethod.Read.All` | Detailed authentication method objects with `-Detailed` |
+| `Policy.Read.All` | Legacy per-user MFA state from the Microsoft Graph beta authentication requirements endpoint |
 
-Role                         UserCount Users                                                         GroupCount Groups                   GroupOwners                  SPsCount SPs                                                     SPsOwners
-----                         --------- -----                                                         ---------- ------                   -----------                  -------- ---                                                     ---------
-Security Reader                      2 {NestedGroupUser@jonyschats.nl, SecurityReader@jonyschats.nl}          1 Security Reader AD Group                                     0
-Global Reader                        1 SecurityReader@jonyschats.nl                                           0                                                              0
-Global Administrator                 1 0xjs@jonyschats.nl                                                     0                                                              0
-Authentication Administrator         1 GroupUser@jonyschats.nl                                                1 Administrator            GroupOwnerUser@jonyschats.nl        1 Test_enterpriseapp                                      ServicePrincipalOwner@jonyschats.nl
-User Administrator                   0                                                                        0                                                              0
-Directory Readers                    0                                                                        0                                                              2 {MicrosoftAzureActiveAuthn, Microsoft.Azure.SyncFabric}
-```
+Inspect the current Graph session with:
 
-## Get-AzureADPrivilegedObjects
-Recursively search through privileged roles and return users and service principal identities and their owners
-
-```
-Get-AzureADPrivilegedObjects
-
-[+] Discovered 2 users
-[+] Discovered 2 group owners
-[+] Discovered 1 service principals
-[+] Discovered 1 service principal owners
-[+] Found 4 highly privileged users
-[+] Found 2 highly privileged service principals
-
-ObjectId                             DisplayName              UserPrincipalName                   UserType
---------                             -----------              -----------------                   --------
-2cc999ae-fe8e-4ce9-a18a-309d68f5bce2 GroupOwnerUser           GroupOwnerUser@jonyschats.nl        Member
-59b28e90-d96b-410b-acc6-fa9ee823bfbd ServicePrincipalOwner    ServicePrincipalOwner@jonyschats.nl Member
-766787e8-82c1-4062-bfa9-5d4a4ca300f3 0xjs                     0xjs@jonyschats.nl                  Member
-eb815e66-31a5-45ca-bed8-2b0f5e24f62f GroupUser                GroupUser@jonyschats.nl             Member
-5530a9cf-a45a-4662-9179-eaa8d9089605 Test_enterpriseapp
-5fef25d5-9886-42df-9d98-de37f6ffd299 Test_enterpriseapp_owner
+```powershell
+Get-MgContext
 ```
 
-## Get-AzureADUserMFAConfiguration
-Get MFA configuration data for the user. Requires a user as input.
+Disconnect when finished:
 
-```
-Get-AzureADUser -all $true | Get-AzureADUserMFAConfiguration
-
-UserPrincipalName             MFA Configured MFA Default
------------------             -------------- -----------
-NestedGroupUser@jonyschats.nl           True Authenticator
-0xjs@jonyschats.nl                      True Microsoft Authenticator
-GroupUser@jonyschats.nl                 True Microsoft Authenticator
-SecurityReader@jonyschats.nl            True Authenticator
+```powershell
+Disconnect-MgGraph
 ```
 
-```
-Get-MsolUser -ObjectId 766787e8-82c1-4062-bfa9-5d4a4ca300f3 | Get-AzureADUserMFAConfiguration -Detailed
+## Commands
 
-UserPrincipalName    : 0xjs@jonyschats.nl
-MFA Configured       : True
-MFA Default          : Microsoft Authenticator
-Per-User MFA         : Enforced
-OneWaySMS            : True
-TwoWayVoiceMobile    : True
-PhoneAppOTP          : True
-PhoneAppNotification : True
-Registered Email     : fakeemail@jonyschats.nl
-Registered Phone     : +31 06123456789
+### `Get-MgGroupMemberRecursive`
+
+Recursively enumerates a Microsoft Entra group and nested groups. By default, the command returns unique user objects.
+
+#### Return users
+
+```powershell
+Get-MgGroup -GroupId '<GROUP-ID>' |
+    Get-MgGroupMemberRecursive
 ```
 
-#### Get MFA status of all privileged users
-```
-Get-AzureADPrivilegedRolesMembers | Get-AzureADUserMFAConfiguration
+Find a group by display name:
+
+```powershell
+Get-MgGroup -All |
+    Where-Object DisplayName -eq '<GROUP-NAME>' |
+    Get-MgGroupMemberRecursive
 ```
 
-# To-Do
-- Rewrite the cmdlets so they always return all objects, filter based on parameter. Then looping through the same commands and roles isn't neccesary to built overviews or retrieve all priviliged identities
+#### Return nested groups
+
+```powershell
+Get-MgGroup -GroupId '<GROUP-ID>' |
+    Get-MgGroupMemberRecursive -ReturnGroups
+```
+
+#### Return service principals
+
+```powershell
+Get-MgGroup -GroupId '<GROUP-ID>' |
+    Get-MgGroupMemberRecursive -ReturnServicePrincipals
+```
+
+Returned objects include properties such as:
+
+```text
+ObjectType
+ObjectId
+DisplayName
+UserPrincipalName
+AppId
+AccountEnabled
+Mail
+SecurityEnabled
+IsAssignableToRole
+```
+
+---
+
+### `Get-MgDirectoryRoleMemberRecursive`
+
+Recursively enumerates the direct and nested members of an active Microsoft Entra directory role. By default, the command returns unique user objects.
+
+#### Return users
+
+```powershell
+Get-MgDirectoryRole -DirectoryRoleId '<ROLE-ID>' |
+    Get-MgDirectoryRoleMemberRecursive
+```
+
+Find a role by display name:
+
+```powershell
+Get-MgDirectoryRole -All |
+    Where-Object DisplayName -eq 'Global Administrator' |
+    Get-MgDirectoryRoleMemberRecursive
+```
+
+#### Return assigned groups
+
+```powershell
+Get-MgDirectoryRole -DirectoryRoleId '<ROLE-ID>' |
+    Get-MgDirectoryRoleMemberRecursive -ReturnGroups
+```
+
+#### Return service principals
+
+```powershell
+Get-MgDirectoryRole -DirectoryRoleId '<ROLE-ID>' |
+    Get-MgDirectoryRoleMemberRecursive -ReturnServicePrincipals
+```
+
+---
+
+### `Get-MgPrivilegedRolesMembers`
+
+Enumerates members of the privileged role set defined in the script.
+
+#### Return privileged users
+
+```powershell
+Get-MgPrivilegedRolesMembers
+```
+
+```powershell
+Get-MgPrivilegedRolesMembers |
+    Format-Table ObjectType, DisplayName, UserPrincipalName, ObjectId -AutoSize
+```
+
+#### Return privileged role groups
+
+```powershell
+Get-MgPrivilegedRolesMembers -ReturnGroups
+```
+
+#### Return privileged service principals
+
+```powershell
+Get-MgPrivilegedRolesMembers -ReturnServicePrincipals
+```
+
+#### Export privileged users
+
+```powershell
+Get-MgPrivilegedRolesMembers |
+    Export-Csv .\PrivilegedUsers.csv -NoTypeInformation -Encoding UTF8
+```
+
+---
+
+### `Get-MgPrivilegedRolesOverview`
+
+Generates an overview of the selected privileged Microsoft Entra roles. The output includes counts and names for users, groups, group owners, service principals, and service principal owners.
+
+```powershell
+$MgPrivilegedRolesOverview = Get-MgPrivilegedRolesOverview
+$MgPrivilegedRolesOverview | Format-Table -AutoSize
+```
+
+Show all properties without table truncation:
+
+```powershell
+$MgPrivilegedRolesOverview |
+    Format-List Role, UserCount, Users, GroupCount, Groups,
+        GroupOwners, SPsCount, SPs, SPsOwners
+```
+
+Export the overview:
+
+```powershell
+$MgPrivilegedRolesOverview |
+    Export-Csv .\PrivilegedRolesOverview.csv -NoTypeInformation -Encoding UTF8
+```
+
+The returned properties are:
+
+```text
+Role
+UserCount
+Users
+GroupCount
+Groups
+GroupOwners
+SPsCount
+SPs
+SPsOwners
+```
+
+> Store the original objects in the variable first. Do not assign the result of `Format-Table` to the variable when the data will be filtered or exported later.
+
+---
+
+### `Get-MgDirectoryRoleOverview`
+
+Generates the same type of overview for all active Microsoft Entra directory roles returned by `Get-MgDirectoryRole`.
+
+```powershell
+$MgDirectoryRoleOverview = Get-MgDirectoryRoleOverview
+$MgDirectoryRoleOverview | Format-Table -AutoSize
+```
+
+Show all properties:
+
+```powershell
+$MgDirectoryRoleOverview |
+    Format-List Role, UserCount, Users, GroupCount, Groups,
+        GroupOwners, SPsCount, SPs, SPsOwners
+```
+
+Export the overview:
+
+```powershell
+$MgDirectoryRoleOverview |
+    Export-Csv .\DirectoryRoleOverview.csv -NoTypeInformation -Encoding UTF8
+```
+
+#### Difference between the overview commands
+
+```powershell
+Get-MgPrivilegedRolesOverview
+```
+
+Checks only the selected privileged roles defined in the script.
+
+```powershell
+Get-MgDirectoryRoleOverview
+```
+
+Checks every active directory role returned by Microsoft Graph.
+
+---
+
+### `Get-MgPrivilegedObjects`
+
+Returns a consolidated and deduplicated collection of highly privileged users and service principals, including owners of privileged groups and service principals.
+
+```powershell
+$PrivilegedObjects = Get-MgPrivilegedObjects
+$PrivilegedObjects | Format-Table -AutoSize
+```
+
+Filter the returned objects by type:
+
+```powershell
+$PrivilegedUsers = $PrivilegedObjects |
+    Where-Object ObjectType -eq 'User'
+
+$PrivilegedServicePrincipals = $PrivilegedObjects |
+    Where-Object ObjectType -eq 'ServicePrincipal'
+```
+
+Export all privileged identities:
+
+```powershell
+$PrivilegedObjects |
+    Export-Csv .\PrivilegedObjects.csv -NoTypeInformation -Encoding UTF8
+```
+
+---
+
+### `Get-MgUserMFAConfiguration`
+
+Reports MFA registration and authentication method information for users.
+
+The primary MFA registration values come from the Microsoft Graph `userRegistrationDetails` report:
+
+- `MFA Configured` maps to `isMfaRegistered`.
+- `MFA Capable` maps to `isMfaCapable`.
+- `MFA Methods` contains registered methods that can represent strong authentication.
+- `Registered Methods` also includes methods that can be used only for SSPR, such as email.
+- `Per-User MFA` is the legacy per-user MFA state and does not represent Conditional Access enforcement.
+
+#### All users
+
+```powershell
+Get-MgUser -All |
+    Get-MgUserMFAConfiguration
+```
+
+#### One user
+
+```powershell
+Get-MgUser -UserId 'user@contoso.com' |
+    Get-MgUserMFAConfiguration
+```
+
+#### Detailed authentication methods
+
+```powershell
+Get-MgUser -UserId 'user@contoso.com' |
+    Get-MgUserMFAConfiguration -Detailed |
+    Format-List
+```
+
+Detailed output can include:
+
+```text
+Authentication Method Objects
+MobilePhoneRegistered
+OneWaySMS
+TwoWayVoiceMobile
+PhoneAppOTP
+PhoneAppNotification
+Registered Email
+Registered Phone
+FIDO2
+WindowsHelloForBusiness
+TemporaryAccessPass
+```
+
+#### MFA status of privileged users
+
+```powershell
+Get-MgPrivilegedRolesMembers |
+    Get-MgUserMFAConfiguration
+```
+
+```powershell
+Get-MgPrivilegedRolesMembers |
+    Get-MgUserMFAConfiguration -Detailed |
+    Format-List
+```
+
+#### Export MFA data
+
+```powershell
+Get-MgUser -All |
+    Get-MgUserMFAConfiguration |
+    Export-Csv .\MFAConfiguration.csv -NoTypeInformation -Encoding UTF8
+```
+
+> `MFA Configured` means that a user has registered for MFA. It does not prove that MFA is required for every sign-in. MFA enforcement can come from Conditional Access, Security Defaults, Identity Protection, or legacy per-user MFA.
+
+## Migration from the previous version
+
+| Previous command | Microsoft Graph command |
+|---|---|
+| `Get-AzureADGroupMemberRecursive` | `Get-MgGroupMemberRecursive` |
+| `Get-AzureADDirectoryRoleMemberRecursive` | `Get-MgDirectoryRoleMemberRecursive` |
+| `Get-AzureADPrivilegedRolesMembers` | `Get-MgPrivilegedRolesMembers` |
+| `Get-AzureADPrivilegedRolesOverview` | `Get-MgPrivilegedRolesOverview` |
+| `Get-AzureADDirectoryRoleOverview` | `Get-MgDirectoryRoleOverview` |
+| `Get-AzureADPrivilegedObjects` | `Get-MgPrivilegedObjects` |
+| `Get-AzureADUserMFAConfiguration` | `Get-MgUserMFAConfiguration` |
+
+The input commands also changed:
+
+| Previous command | Microsoft Graph equivalent |
+|---|---|
+| `Connect-AzureAD` | `Connect-MgGraph` |
+| `Get-AzureADUser` | `Get-MgUser` |
+| `Get-AzureADGroup` | `Get-MgGroup` |
+| `Get-AzureADDirectoryRole` | `Get-MgDirectoryRole` |
+| `Get-MsolUser` | `Get-MgUser` and the Microsoft Graph authentication reporting APIs |
+
+Common parameter changes include:
+
+```text
+-ObjectId  -> -UserId, -GroupId, -DirectoryRoleId, or -ServicePrincipalId
+-All $true -> -All
+```
+
+## Important limitations
+
+### Active directory roles only
+
+`Get-MgDirectoryRole` returns directory roles that are activated in the tenant. `Get-MgDirectoryRoleOverview` therefore does not list inactive role templates.
+
+### PIM eligibility
+
+The current commands enumerate active directory role membership. Eligible Microsoft Entra Privileged Identity Management assignments are not included.
+
+### Static privileged role list
+
+`Get-MgPrivilegedRolesMembers` and `Get-MgPrivilegedRolesOverview` use a role-name list defined in the script. Review this list when Microsoft adds or renames directory roles, or when a tenant treats additional roles as privileged.
+
+### Beta endpoints
+
+The script uses Microsoft Graph beta endpoints internally for selected compatibility and reporting operations, including the legacy per-user MFA state. Beta APIs can change and should be retested after Microsoft Graph updates.
+
+### Group owner availability
+
+Microsoft Graph might not return owners for some Exchange-created groups, distribution groups, or groups synchronized from an on-premises environment.
+
+### Read permissions and directory roles
+
+Microsoft Graph permissions alone might not be sufficient for all directory data. In delegated sessions, the signed-in user can also require an appropriate Microsoft Entra directory role. Insufficient access can result in objects containing only an ID and object type.
+
+## Troubleshooting
+
+### The script is not digitally signed
+
+Files downloaded from the internet can be marked as blocked by Windows:
+
+```powershell
+Unblock-File .\MgPowerCommands.ps1
+Import-Module .\MgPowerCommands.ps1 -Force
+```
+
+If an organizational policy enforces `AllSigned`, the script must be signed by a trusted code-signing certificate.
+
+Check the effective execution policies:
+
+```powershell
+Get-ExecutionPolicy -List
+```
+
+### Results contain only IDs
+
+Reconnect with the required scopes and confirm that admin consent has been granted:
+
+```powershell
+Disconnect-MgGraph
+Connect-MgGraph -Scopes @(
+    'Directory.Read.All'
+    'AuditLog.Read.All'
+    'UserAuthenticationMethod.Read.All'
+    'Policy.Read.All'
+)
+```
+
+Then inspect the session:
+
+```powershell
+Get-MgContext | Format-List
+```
+
+### Reload after updating the script
+
+```powershell
+Remove-Module MgPowerCommands -ErrorAction SilentlyContinue
+Import-Module .\MgPowerCommands.ps1 -Force
+```
+
+Alternatively, open a new PowerShell session.
+
+### Show verbose enumeration messages
+
+```powershell
+Get-MgPrivilegedRolesOverview -Verbose
+```
+
+## Microsoft Graph documentation
+
+- [Install the Microsoft Graph PowerShell SDK](https://learn.microsoft.com/powershell/microsoftgraph/installation)
+- [Connect-MgGraph](https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph)
+- [Upgrade from Azure AD PowerShell to Microsoft Graph PowerShell](https://learn.microsoft.com/powershell/microsoftgraph/migration-steps)
+- [Get-MgDirectoryRole](https://learn.microsoft.com/powershell/module/microsoft.graph.identity.directorymanagement/get-mgdirectoryrole)
+- [Get-MgUserAuthenticationMethod](https://learn.microsoft.com/powershell/module/microsoft.graph.identity.signins/get-mguserauthenticationmethod)
+- [Get-MgReportAuthenticationMethodUserRegistrationDetail](https://learn.microsoft.com/powershell/module/microsoft.graph.reports/get-mgreportauthenticationmethoduserregistrationdetail)
+- [userRegistrationDetails resource](https://learn.microsoft.com/graph/api/resources/userregistrationdetails)
+
+## Author
+
+Jony Schats - [0xJs](https://github.com/0xJs)
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
