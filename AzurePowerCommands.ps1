@@ -1,655 +1,1117 @@
-Function Get-AzureADGroupMemberRecursive{
+# AzurePowerCommands - Microsoft Graph edition
+# Public commands use the Microsoft Graph PowerShell Get-Mg naming convention.
+# Recommended delegated scopes:
+#   Directory.Read.All
+#   AuditLog.Read.All
+#   UserAuthenticationMethod.Read.All
+#   Policy.Read.All
+# Some operations also require an appropriate Microsoft Entra directory role.
+
+Update-TypeData -TypeName 'AzurePowerCommands.User' -DefaultDisplayPropertySet @('ObjectType', 'ObjectId', 'DisplayName', 'UserPrincipalName', 'AccountEnabled') -Force
+Update-TypeData -TypeName 'AzurePowerCommands.Group' -DefaultDisplayPropertySet @('ObjectType', 'ObjectId', 'DisplayName', 'Mail', 'SecurityEnabled', 'IsAssignableToRole') -Force
+Update-TypeData -TypeName 'AzurePowerCommands.ServicePrincipal' -DefaultDisplayPropertySet @('ObjectType', 'ObjectId', 'DisplayName', 'AppId', 'AccountEnabled') -Force
+Update-TypeData -TypeName 'AzurePowerCommands.Application' -DefaultDisplayPropertySet @('ObjectType', 'ObjectId', 'DisplayName', 'AppId') -Force
+Update-TypeData -TypeName 'AzurePowerCommands.DirectoryObject' -DefaultDisplayPropertySet @('ObjectType', 'ObjectId', 'DisplayName') -Force
+
+$script:AzurePowerDirectoryObjectCache = @{}
+$script:AzurePowerDirectoryObjectCacheTenantId = $null
+
+function Assert-AzurePowerGraphConnection {
+    [CmdletBinding()]
+    param()
+
+    if (-not (Get-Command Get-MgContext -ErrorAction SilentlyContinue)) {
+        throw 'Microsoft Graph PowerShell is not installed or imported.'
+    }
+
+    $Context = Get-MgContext
+    if (-not $Context) {
+        throw "You're not connected with Microsoft Graph. Connect with Connect-MgGraph."
+    }
+
+    if ($script:AzurePowerDirectoryObjectCacheTenantId -ne $Context.TenantId) {
+        $script:AzurePowerDirectoryObjectCache = @{}
+        $script:AzurePowerDirectoryObjectCacheTenantId = $Context.TenantId
+    }
+}
+
+function Get-AzurePowerPropertyValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputObject,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Name
+    )
+
+    foreach ($PropertyName in $Name) {
+        if ($null -ne $InputObject.PSObject.Methods['ContainsKey']) {
+            if ($InputObject.ContainsKey($PropertyName)) {
+                return $InputObject[$PropertyName]
+            }
+        }
+        elseif ($InputObject -is [System.Collections.IDictionary]) {
+            $Dictionary = [System.Collections.IDictionary]$InputObject
+            if ($Dictionary.Contains([object]$PropertyName)) {
+                return $Dictionary[$PropertyName]
+            }
+        }
+
+        $Property = $InputObject.PSObject.Properties[$PropertyName]
+        if ($null -ne $Property) {
+            return $Property.Value
+        }
+
+        $AdditionalPropertiesProperty = $InputObject.PSObject.Properties['AdditionalProperties']
+        if ($null -ne $AdditionalPropertiesProperty) {
+            $AdditionalProperties = $AdditionalPropertiesProperty.Value
+
+            if ($null -ne $AdditionalProperties -and $null -ne $AdditionalProperties.PSObject.Methods['ContainsKey']) {
+                if ($AdditionalProperties.ContainsKey($PropertyName)) {
+                    return $AdditionalProperties[$PropertyName]
+                }
+            }
+            elseif ($AdditionalProperties -is [System.Collections.IDictionary]) {
+                $Dictionary = [System.Collections.IDictionary]$AdditionalProperties
+                if ($Dictionary.Contains([object]$PropertyName)) {
+                    return $Dictionary[$PropertyName]
+                }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-AzurePowerObjectId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputObject
+    )
+
+    if ($InputObject -is [string]) {
+        return [string]$InputObject
+    }
+
+    $Id = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('Id', 'ObjectId', 'id', 'objectId')
+    if ([string]::IsNullOrWhiteSpace([string]$Id)) {
+        throw 'The supplied object does not contain an Id or ObjectId property.'
+    }
+
+    return [string]$Id
+}
+
+function Get-AzurePowerObjectType {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputObject
+    )
+
+    $ObjectType = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('ObjectType', 'objectType')
+    if ($ObjectType) {
+        switch -Regex ([string]$ObjectType) {
+            '^user$'             { return 'User' }
+            '^group$'            { return 'Group' }
+            '^serviceprincipal$' { return 'ServicePrincipal' }
+            '^application$'      { return 'Application' }
+        }
+    }
+
+    $ODataType = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('@odata.type', 'ODataType')
+    if ($ODataType) {
+        switch -Regex ([string]$ODataType) {
+            'microsoft\.graph\.user$'             { return 'User' }
+            'microsoft\.graph\.group$'            { return 'Group' }
+            'microsoft\.graph\.servicePrincipal$' { return 'ServicePrincipal' }
+            'microsoft\.graph\.application$'      { return 'Application' }
+        }
+    }
+
+    foreach ($TypeName in $InputObject.PSObject.TypeNames) {
+        switch -Regex ($TypeName) {
+            'MicrosoftGraphUser$'             { return 'User' }
+            'MicrosoftGraphGroup$'            { return 'Group' }
+            'MicrosoftGraphServicePrincipal$' { return 'ServicePrincipal' }
+            'MicrosoftGraphApplication$'      { return 'Application' }
+            'AzurePowerCommands\.User$'             { return 'User' }
+            'AzurePowerCommands\.Group$'            { return 'Group' }
+            'AzurePowerCommands\.ServicePrincipal$' { return 'ServicePrincipal' }
+            'AzurePowerCommands\.Application$'      { return 'Application' }
+        }
+    }
+
+    if (Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('UserPrincipalName', 'userPrincipalName')) {
+        return 'User'
+    }
+
+    if (Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('AppId', 'appId')) {
+        return 'ServicePrincipal'
+    }
+
+    if ($null -ne (Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('SecurityEnabled', 'securityEnabled'))) {
+        return 'Group'
+    }
+
+    return 'DirectoryObject'
+}
+
+function ConvertTo-AzurePowerDirectoryObject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $InputObject,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('User', 'Group', 'ServicePrincipal', 'Application', 'DirectoryObject')]
+        [string]$ObjectType
+    )
+
+    process {
+        $ResolvedObjectType = $ObjectType
+        if (-not $ResolvedObjectType) {
+            $ResolvedObjectType = Get-AzurePowerObjectType -InputObject $InputObject
+        }
+
+        $Id = Get-AzurePowerObjectId -InputObject $InputObject
+        $ODataType = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('@odata.type', 'ODataType')
+
+        [PSCustomObject]@{
+            PSTypeName           = "AzurePowerCommands.$ResolvedObjectType"
+            ObjectType           = $ResolvedObjectType
+            ObjectId             = $Id
+            Id                   = $Id
+            DisplayName          = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('DisplayName', 'displayName')
+            UserPrincipalName    = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('UserPrincipalName', 'userPrincipalName')
+            AppId                = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('AppId', 'appId')
+            AccountEnabled       = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('AccountEnabled', 'accountEnabled')
+            Mail                 = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('Mail', 'mail')
+            SecurityEnabled      = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('SecurityEnabled', 'securityEnabled')
+            IsAssignableToRole   = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('IsAssignableToRole', 'isAssignableToRole')
+            ServicePrincipalType = Get-AzurePowerPropertyValue -InputObject $InputObject -Name @('ServicePrincipalType', 'servicePrincipalType')
+            ODataType            = $ODataType
+        }
+    }
+}
+
+function Resolve-AzurePowerDirectoryObject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $DirectoryObject
+    )
+
+    process {
+        $Id = Get-AzurePowerObjectId -InputObject $DirectoryObject
+        $ObjectType = Get-AzurePowerObjectType -InputObject $DirectoryObject
+        $CacheKey = "$ObjectType|$Id"
+
+        if ($script:AzurePowerDirectoryObjectCache.ContainsKey($CacheKey)) {
+            $script:AzurePowerDirectoryObjectCache[$CacheKey]
+            return
+        }
+
+        $ResolvedObject = $null
+
+        try {
+            switch ($ObjectType) {
+                'User' {
+                    $ResolvedObject = Get-MgUser -UserId $Id -Property @('Id', 'DisplayName', 'UserPrincipalName', 'AccountEnabled', 'Mail') -ErrorAction Stop |
+                        ConvertTo-AzurePowerDirectoryObject -ObjectType User
+                }
+                'Group' {
+                    $ResolvedObject = Get-MgGroup -GroupId $Id -Property @('Id', 'DisplayName', 'Mail', 'SecurityEnabled', 'IsAssignableToRole') -ErrorAction Stop |
+                        ConvertTo-AzurePowerDirectoryObject -ObjectType Group
+                }
+                'ServicePrincipal' {
+                    $ResolvedObject = Get-MgServicePrincipal -ServicePrincipalId $Id -Property @('Id', 'DisplayName', 'AppId', 'AccountEnabled', 'ServicePrincipalType') -ErrorAction Stop |
+                        ConvertTo-AzurePowerDirectoryObject -ObjectType ServicePrincipal
+                }
+                'Application' {
+                    $ResolvedObject = Get-MgApplication -ApplicationId $Id -Property @('Id', 'DisplayName', 'AppId') -ErrorAction Stop |
+                        ConvertTo-AzurePowerDirectoryObject -ObjectType Application
+                }
+                default {
+                    $ResolvedObject = ConvertTo-AzurePowerDirectoryObject -InputObject $DirectoryObject -ObjectType DirectoryObject
+                }
+            }
+        }
+        catch {
+            Write-Verbose "Could not resolve $ObjectType object ${Id}: $($_.Exception.Message)"
+            $ResolvedObject = ConvertTo-AzurePowerDirectoryObject -InputObject $DirectoryObject -ObjectType $ObjectType
+        }
+
+        $script:AzurePowerDirectoryObjectCache[$CacheKey] = $ResolvedObject
+        $ResolvedObject
+    }
+}
+
+function Invoke-AzurePowerGraphCollectionRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri
+    )
+
+    $NextLink = $Uri
+    while ($NextLink) {
+        $Response = Invoke-MgGraphRequest -Method GET -Uri $NextLink -ErrorAction Stop
+        $Values = Get-AzurePowerPropertyValue -InputObject $Response -Name @('value')
+
+        if ($null -ne $Values) {
+            foreach ($Value in @($Values)) {
+                $Value
+            }
+        }
+
+        $NextLink = Get-AzurePowerPropertyValue -InputObject $Response -Name @('@odata.nextLink')
+    }
+}
+
+function Get-AzurePowerGroupDirectMembers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GroupId,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeServicePrincipals
+    )
+
+    if ($IncludeServicePrincipals) {
+        # The v1.0 group members endpoint has a documented limitation where service
+        # principals can be omitted. Beta is used only for this compatibility path.
+        $EscapedGroupId = [uri]::EscapeDataString($GroupId)
+        $Members = Invoke-AzurePowerGraphCollectionRequest -Uri "https://graph.microsoft.com/beta/groups/$EscapedGroupId/members"
+    }
+    else {
+        $Members = Get-MgGroupMember -GroupId $GroupId -All -ErrorAction Stop
+    }
+
+    foreach ($Member in @($Members)) {
+        Resolve-AzurePowerDirectoryObject -DirectoryObject $Member
+    }
+}
+
+function Get-AzurePowerGroupMembersRecursive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GroupId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Users', 'Groups', 'ServicePrincipals')]
+        [string]$Mode,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$VisitedGroups
+    )
+
+    if ($VisitedGroups.ContainsKey($GroupId)) {
+        return
+    }
+    $VisitedGroups[$GroupId] = $true
+
+    $Members = @(Get-AzurePowerGroupDirectMembers -GroupId $GroupId -IncludeServicePrincipals:($Mode -eq 'ServicePrincipals'))
+    $GroupMembers = @($Members | Where-Object { $_.ObjectType -eq 'Group' })
+
+    switch ($Mode) {
+        'Users' {
+            $Members | Where-Object { $_.ObjectType -eq 'User' }
+        }
+        'Groups' {
+            $GroupMembers
+        }
+        'ServicePrincipals' {
+            $Members | Where-Object { $_.ObjectType -eq 'ServicePrincipal' }
+        }
+    }
+
+    foreach ($GroupMember in $GroupMembers) {
+        Get-AzurePowerGroupMembersRecursive -GroupId $GroupMember.ObjectId -Mode $Mode -VisitedGroups $VisitedGroups
+    }
+}
+
+function Get-AzurePowerDirectoryRoleDirectMembers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DirectoryRoleId
+    )
+
+    $Members = Get-MgDirectoryRoleMember -DirectoryRoleId $DirectoryRoleId -All -ErrorAction Stop
+    foreach ($Member in @($Members)) {
+        Resolve-AzurePowerDirectoryObject -DirectoryObject $Member
+    }
+}
+
+function Get-AzurePowerDirectoryRoleMembersRecursive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DirectoryRoleId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Users', 'Groups', 'ServicePrincipals')]
+        [string]$Mode
+    )
+
+    $Members = @(Get-AzurePowerDirectoryRoleDirectMembers -DirectoryRoleId $DirectoryRoleId)
+    $GroupMembers = @($Members | Where-Object { $_.ObjectType -eq 'Group' })
+
+    switch ($Mode) {
+        'Users' {
+            $Members | Where-Object { $_.ObjectType -eq 'User' }
+        }
+        'Groups' {
+            $GroupMembers
+        }
+        'ServicePrincipals' {
+            $Members | Where-Object { $_.ObjectType -eq 'ServicePrincipal' }
+        }
+    }
+
+    $VisitedGroups = @{}
+    foreach ($GroupMember in $GroupMembers) {
+        Get-AzurePowerGroupMembersRecursive -GroupId $GroupMember.ObjectId -Mode $Mode -VisitedGroups $VisitedGroups
+    }
+}
+
+function Get-AzurePowerGroupOwners {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GroupId
+    )
+
+    # Beta is used because v1.0 can omit service principals that own groups.
+    $EscapedGroupId = [uri]::EscapeDataString($GroupId)
+    $Owners = Invoke-AzurePowerGraphCollectionRequest -Uri "https://graph.microsoft.com/beta/groups/$EscapedGroupId/owners"
+    foreach ($Owner in @($Owners)) {
+        Resolve-AzurePowerDirectoryObject -DirectoryObject $Owner
+    }
+}
+
+function Get-AzurePowerServicePrincipalOwners {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ServicePrincipalId
+    )
+
+    $Owners = Get-MgServicePrincipalOwner -ServicePrincipalId $ServicePrincipalId -All -ErrorAction Stop
+    foreach ($Owner in @($Owners)) {
+        Resolve-AzurePowerDirectoryObject -DirectoryObject $Owner
+    }
+}
+
+function Get-AzurePowerOwnerLabel {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $Owner
+    )
+
+    process {
+        if ($Owner.ObjectType -eq 'User' -and $Owner.UserPrincipalName) {
+            $Owner.UserPrincipalName
+        }
+        elseif ($Owner.DisplayName) {
+            $Owner.DisplayName
+        }
+        elseif ($Owner.AppId) {
+            $Owner.AppId
+        }
+        else {
+            $Owner.ObjectId
+        }
+    }
+}
+
+function Get-AzurePowerPrivilegedRoleNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [switch]$OverviewSubset
+    )
+
+    if ($OverviewSubset) {
+        return @(
+            'Global administrator',
+            'Application administrator',
+            'Authentication Administrator',
+            'Billing administrator',
+            'Cloud application administrator',
+            'Conditional Access administrator',
+            'Exchange administrator',
+            'Helpdesk administrator',
+            'Password administrator',
+            'Privileged authentication administrator',
+            'Privileged Role Administrator',
+            'Security administrator',
+            'SharePoint administrator',
+            'User administrator'
+        )
+    }
+
+    return @(
+        'Global administrator',
+        'Application administrator',
+        'Authentication Administrator',
+        'Billing administrator',
+        'Cloud application administrator',
+        'Conditional Access administrator',
+        'Exchange administrator',
+        'Helpdesk administrator',
+        'Password administrator',
+        'Privileged authentication administrator',
+        'Privileged Role Administrator',
+        'Security administrator',
+        'SharePoint administrator',
+        'User administrator',
+        'Authentication policy administrator',
+        'Directory writers',
+        'External identity provider administrator',
+        'Hybrid identity administrator',
+        'Identity governance administrator',
+        'Intune Administrator',
+        'License administrator',
+        'Partner tier 1 support',
+        'Partner tier 2 support',
+        'Dynamics 365 Administrator',
+        'Dynamics 365 Business Central Administrator',
+        'Power Platform Administrator'
+    )
+}
+
+function Get-MgGroupMemberRecursive {
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADGroupMember
+Required Dependencies: Get-MgGroupMember, Invoke-MgGraphRequest
 Optional Dependencies: None
 
 .DESCRIPTION
-Recursively search through groups and only return unique user objects. Requires the Get-AzureADGroup as input.
+Recursively search through Microsoft Entra groups and only return unique user objects. Requires a group from Get-MgGroup as input.
+
+.PARAMETER Group
+A group object returned by Get-MgGroup, or another object containing an Id or ObjectId property.
 
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
-.PARAMETER ServicePrincipals
+.PARAMETER ReturnServicePrincipals
 Return service principals instead of user objects.
 
 .EXAMPLE
-Get-AzureADGroup -ObjectId <ID> | Get-AzureADGroupMemberRecursive
+Get-MgGroup -GroupId <ID> | Get-MgGroupMemberRecursive
 
 .EXAMPLE
-Get-AzureADGroup | Where-Object -Property Displayname -eq "<GROUP>" | Get-AzureADGroupMemberRecursive
+Get-MgGroup -All | Where-Object -Property DisplayName -eq "<GROUP>" | Get-MgGroupMemberRecursive
 #>
-	[cmdletbinding()]
-	param(
-	[parameter(Mandatory=$True,ValueFromPipeline=$true)]
-	$AzureGroup,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnGroups,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnServicePrincipals
-	)
-		Begin{
-			# Check if Azure AD is loaded
-			If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-				Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-				break
-			}
-			
-			# Check connection with AzureAD
-			try {
-				$var = Get-AzureADTenantDetail
-			}
-			catch {
-				Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-				break
-			}
-		
-			$Output = @()
-		}
-		
-		Process {
-			Write-Verbose -Message "Enumerating $($AzureGroup.DisplayName)"
-			$Members = Get-AzureADGroupMember -ObjectId $AzureGroup.ObjectId -All $true
-			
-			if ($ReturnGroups){
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnGroups -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-			elseif ($ReturnServicePrincipals) {
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'ServicePrincipal'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnServicePrincipals -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-			else {
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-			
-			
-			
-		}
-		
-		end {
-			Return $Output | Sort-Object -Unique
-		}
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $Group,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnGroups,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnServicePrincipals
+    )
+
+    begin {
+        Assert-AzurePowerGraphConnection
+        $Output = @()
+        $VisitedGroups = @{}
+    }
+
+    process {
+        $GroupId = Get-AzurePowerObjectId -InputObject $Group
+        $DisplayName = Get-AzurePowerPropertyValue -InputObject $Group -Name @('DisplayName', 'displayName')
+        Write-Verbose "Enumerating $DisplayName"
+
+        if ($ReturnGroups) {
+            $Mode = 'Groups'
+        }
+        elseif ($ReturnServicePrincipals) {
+            $Mode = 'ServicePrincipals'
+        }
+        else {
+            $Mode = 'Users'
+        }
+
+        $Output += Get-AzurePowerGroupMembersRecursive -GroupId $GroupId -Mode $Mode -VisitedGroups $VisitedGroups
+    }
+
+    end {
+        $Output | Where-Object { $_ } | Sort-Object -Property ObjectId -Unique
+    }
 }
 
-Function Get-AzureADDirectoryRoleMemberRecursive{
+function Get-MgDirectoryRoleMemberRecursive {
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
+Required Dependencies: Get-MgDirectoryRoleMember, Get-MgGroupMemberRecursive
 Optional Dependencies: None
 
 .DESCRIPTION
-Recursively search through roles and only return unique user objects. Requires the Get-AzureADDirectoryRole as input.
+Recursively search through Microsoft Entra directory roles and only return unique user objects. Requires a role from Get-MgDirectoryRole as input.
+
+.PARAMETER RoleGroup
+A directory role object returned by Get-MgDirectoryRole, or another object containing an Id or ObjectId property.
 
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
-.PARAMETER ServicePrincipals
+.PARAMETER ReturnServicePrincipals
 Return service principals instead of user objects.
 
 .EXAMPLE
-Get-AzureADDirectoryRole -ObjectId <ID> | Get-AzureADDirectoryRoleMemberRecursive
+Get-MgDirectoryRole -DirectoryRoleId <ID> | Get-MgDirectoryRoleMemberRecursive
 
 .EXAMPLE
-Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq "<ROLE>" | Get-AzureADDirectoryRoleMemberRecursive
+Get-MgDirectoryRole -All | Where-Object -Property DisplayName -eq "<ROLE>" | Get-MgDirectoryRoleMemberRecursive
 #>
-	[cmdletbinding()]
-	param(
-	[parameter(Mandatory=$True,ValueFromPipeline=$true)]
-	$RoleGroup,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnGroups,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnServicePrincipals
-	)
-		Begin{
-			# Check if Azure AD is loaded
-			If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-				Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-				break
-			}
-			
-			# Check connection with AzureAD
-			try {
-				$var = Get-AzureADTenantDetail
-			}
-			catch {
-				Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-				break
-			}
-		
-			$Output = @()
-		}
-		
-		Process {
-			Write-Verbose -Message "Enumerating $($RoleGroup.DisplayName)"
-			$Members = Get-AzureADDirectoryRoleMember -ObjectId $RoleGroup.ObjectId
-			
-			if ($ReturnGroups){
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnGroups -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-			elseif ($ReturnServicePrincipals) {
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'ServicePrincipal'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -ReturnServicePrincipals -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-			else {
-				$UserMembers = $Members | Where-Object{$_.ObjectType -eq 'User'}
-				$Output += $UserMembers
-				
-				$GroupMembers = $Members | Where-Object{$_.ObjectType -eq 'Group'}
-				If($GroupMembers){
-					$UserMembers = $GroupMembers | ForEach-Object{ Get-AzureADGroupMemberRecursive -AzureGroup $_}
-					$Output += $UserMembers
-				}
-			}
-		}
-		
-		end {
-			Return $Output | Sort-Object -Unique
-		}
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $RoleGroup,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnGroups,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnServicePrincipals
+    )
+
+    begin {
+        Assert-AzurePowerGraphConnection
+        $Output = @()
+    }
+
+    process {
+        $RoleId = Get-AzurePowerObjectId -InputObject $RoleGroup
+        $DisplayName = Get-AzurePowerPropertyValue -InputObject $RoleGroup -Name @('DisplayName', 'displayName')
+        Write-Verbose "Enumerating $DisplayName"
+
+        if ($ReturnGroups) {
+            $Mode = 'Groups'
+        }
+        elseif ($ReturnServicePrincipals) {
+            $Mode = 'ServicePrincipals'
+        }
+        else {
+            $Mode = 'Users'
+        }
+
+        $Output += Get-AzurePowerDirectoryRoleMembersRecursive -DirectoryRoleId $RoleId -Mode $Mode
+    }
+
+    end {
+        $Output | Where-Object { $_ } | Sort-Object -Property ObjectId -Unique
+    }
 }
 
-Function Get-AzureADPrivilegedRolesMembers{
+function Get-MgPrivilegedRolesMembers {
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
+Required Dependencies: Get-MgDirectoryRole, Get-MgDirectoryRoleMemberRecursive
 Optional Dependencies: None
 
 .DESCRIPTION
-Recursively search through privileged roles and only return unique user objects.
+Recursively search through privileged Microsoft Entra roles and only return unique user objects.
 
 .PARAMETER ReturnGroups
 Return group objects instead of user objects.
 
-.PARAMETER ServicePrincipals
+.PARAMETER ReturnServicePrincipals
 Return service principals instead of user objects.
 
 .EXAMPLE
-Get-AzureADPrivilegedRolesMembers
-
-#>
-	[cmdletbinding()]
-	param(
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnGroups,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$ReturnServicePrincipals
-	)
-	
-    Begin{
-		# Check if Azure AD is loaded
-		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-			break
-		}
-        
-		# Check connection with AzureAD
-		try {
-			$var = Get-AzureADTenantDetail
-		}
-		catch {
-			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-			break
-		}
-		
-		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator", "Authentication policy administrator", "Directory writers", "External identity provider administrator", "Hybrid identity administrator", "Identity governance administrator", "Intune Administrator", "License administrator", "Partner tier 1 support", "Partner tier 2 support", "Dynamics 365 Administrator", "Dynamics 365 Business Central Administrator", "Power Platform Administrator"
-		$Output = @()
-    }
-	
-	Process {
-		foreach ($AdminRole in $AdminRoles) {			
-			$AdminRoleData = Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq $AdminRole
-			Write-Verbose -Message "Enumerating $($AdminRoleData.DisplayName)"
-			
-			# If the role is populated
-			if ($AdminRoleData -ne $null){
-				if ($ReturnGroups){
-					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
-					$Output += $AdminRoleMembers
-				}
-				elseif ($ReturnServicePrincipals) {
-					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
-					$Output += $AdminRoleMembers
-				}
-				else {
-					$AdminRoleMembers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-					$Output += $AdminRoleMembers
-				}
-			}
-		}
-	}
-
-	end {
-        Return $Output | Sort-Object -Unique
-    }
-}
-
-Function Get-AzureADPrivilegedRolesOverview{
-<#
-.SYNOPSIS
-Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
-Optional Dependencies: None
-
-.DESCRIPTION
-Recursively search through privileged Azure AD roles and return a overview of the amount of members a role has and the members itself.
+Get-MgPrivilegedRolesMembers
 
 .EXAMPLE
-Get-AzureADPrivilegedRolesOverview
-
-#>
-    Begin{
-		# Check if Azure AD is loaded
-		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-			break
-		}
-        
-		# Check connection with AzureAD
-		try {
-			$var = Get-AzureADTenantDetail
-		}
-		catch {
-			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-			break
-		}
-		
-		$AdminRoles = "Global administrator", "Application administrator", "Authentication Administrator", "Billing administrator", "Cloud application administrator", "Conditional Access administrator", "Exchange administrator", "Helpdesk administrator", "Password administrator", "Privileged authentication administrator", "Privileged Role Administrator", "Security administrator", "SharePoint administrator", "User administrator"
-		$Output = @()
-    }
-	
-	Process {		
-		foreach ($AdminRole in $AdminRoles) {
-			$AdminRoleData = Get-AzureADDirectoryRole | Where-Object -Property Displayname -eq $AdminRole
-			Write-Verbose -Message "Enumerating $($AdminRoleData.DisplayName)"
-
-			# If the role is populated
-			if ($AdminRoleData -ne $null){
-				
-				# Retrieve members of the AdminRole
-				$AdminRoleMembersUsers = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-				$AdminRoleMembersUsersCount = $AdminRoleMembersUsers | Sort-Object -Unique | Measure-Object
-				
-				$AdminRoleMembersGroups = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
-				$AdminRoleMembersGroupsCount = $AdminRoleMembersGroups | Sort-Object -Unique | Measure-Object
-				$GroupOwners = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups | Get-AzureADGroupOwner
-				
-				$AdminRoleMembersSPs = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
-				$AdminRoleMembersSPsCount = $AdminRoleMembersSPs | Sort-Object -Unique | Measure-Object
-				$ServicePrincipalOwners = Get-AzureADDirectoryRole -ObjectId $AdminRoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
-				
-				$item = New-Object PSObject
-				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRoleData.DisplayName
-				
-				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $AdminRoleMembersUsersCount.Count
-				$item | Add-Member -type NoteProperty -Name 'Users' -Value $AdminRoleMembersUsers.UserPrincipalName
-				
-				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value $AdminRoleMembersGroupsCount.Count
-				$item | Add-Member -type NoteProperty -Name 'Groups' -Value $AdminRoleMembersGroups.DisplayName
-				$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName
-				
-				$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value $AdminRoleMembersSPsCount.Count
-				$item | Add-Member -type NoteProperty -Name 'SPs' -Value $AdminRoleMembersSPs.DisplayName
-				$item | Add-Member -type NoteProperty -Name 'SPsOwners' -Value $ServicePrincipalOwners.UserPrincipalName
-				
-				$Output += $item
-			}
-			else {
-				$item = New-Object PSObject
-				$item | Add-Member -type NoteProperty -Name 'Role' -Value $AdminRole
-				$item | Add-Member -type NoteProperty -Name 'UserCount' -Value "0"
-				$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value "0"
-				$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value "0"
-				$Output += $item
-			}
-		}
-	}
-
-	end {
-        Return $Output | Sort-Object -Property UserCount -Descending
-    }
-}
-
-Function Get-AzureADDirectoryRoleOverview{
-<#
-.SYNOPSIS
-Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
-Optional Dependencies: None
-
-.DESCRIPTION
-Recursively search through all active Azure AD roles and return a overview of the amount of members a role has and the members itself.
+Get-MgPrivilegedRolesMembers -ReturnGroups
 
 .EXAMPLE
-Get-AzureADDirectoryRoleOverview
-
+Get-MgPrivilegedRolesMembers -ReturnServicePrincipals
 #>
-    Begin{
-        		# Check if Azure AD is loaded
-		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-			break
-		}
-        
-		# Check connection with AzureAD
-		try {
-			$var = Get-AzureADTenantDetail
-		}
-		catch {
-			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-			break
-		}
-		
-		$Output = @()
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnGroups,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnServicePrincipals
+    )
+
+    begin {
+        Assert-AzurePowerGraphConnection
+        $Output = @()
+        $ActiveRoles = @(Get-MgDirectoryRole -All -ErrorAction Stop)
     }
-	
-	Process {
-		$AzureADRoles = Get-AzureADDirectoryRole
 
-		foreach ($RoleData in $AzureADRoles) {
-			Write-Verbose -Message "Enumerating $($RoleData.DisplayName)"
-				
-			$RoleMembersUsers = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive
-			$RoleMembersUsersCount = $RoleMembersUsers | Sort-Object -Unique | Measure-Object
-			
-			$RoleMembersGroups = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups
-			$RoleMembersGroupsCount = $RoleMembersGroups | Sort-Object -Unique | Measure-Object
-			$GroupOwners = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnGroups | Get-AzureADGroupOwner
-			
-			$RoleMembersSPs = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals
-			$RoleMembersSPsCount = $RoleMembersSPs | Sort-Object -Unique | Measure-Object
-			$ServicePrincipalOwners = Get-AzureADDirectoryRole -ObjectId $RoleData.ObjectId | Get-AzureADDirectoryRoleMemberRecursive -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
-			
-			$item = New-Object PSObject
-			$item | Add-Member -type NoteProperty -Name 'Role' -Value $RoleData.DisplayName
-			
-			$item | Add-Member -type NoteProperty -Name 'UserCount' -Value $RoleMembersUsersCount.Count
-			$item | Add-Member -type NoteProperty -Name 'Users' -Value $RoleMembersUsers.UserPrincipalName
-			
-			$item | Add-Member -type NoteProperty -Name 'GroupCount' -Value $RoleMembersGroupsCount.Count
-			$item | Add-Member -type NoteProperty -Name 'Groups' -Value $RoleMembersGroups.DisplayName
-			$item | Add-Member -type NoteProperty -Name 'GroupOwners' -Value $GroupOwners.UserPrincipalName
-			
-			$item | Add-Member -type NoteProperty -Name 'SPsCount' -Value $RoleMembersSPsCount.Count
-			$item | Add-Member -type NoteProperty -Name 'SPs' -Value $RoleMembersSPs.DisplayName
-			$item | Add-Member -type NoteProperty -Name 'SPsOwners' -Value $ServicePrincipalOwners.UserPrincipalName
-			
-			$Output += $item
-			}
-	}
+    process {
+        foreach ($AdminRole in (Get-AzurePowerPrivilegedRoleNames)) {
+            $AdminRoleData = $ActiveRoles | Where-Object { $_.DisplayName -ieq $AdminRole } | Select-Object -First 1
+            Write-Verbose "Enumerating $($AdminRoleData.DisplayName)"
 
-	end {
-        Return $Output | Sort-Object -Property UserCount -Descending
+            if ($null -eq $AdminRoleData) {
+                continue
+            }
+
+            if ($ReturnGroups) {
+                $Output += $AdminRoleData | Get-MgDirectoryRoleMemberRecursive -ReturnGroups
+            }
+            elseif ($ReturnServicePrincipals) {
+                $Output += $AdminRoleData | Get-MgDirectoryRoleMemberRecursive -ReturnServicePrincipals
+            }
+            else {
+                $Output += $AdminRoleData | Get-MgDirectoryRoleMemberRecursive
+            }
+        }
+    }
+
+    end {
+        $Output | Where-Object { $_ } | Sort-Object -Property ObjectId -Unique
     }
 }
 
-Function Get-AzureADPrivilegedObjects{
+function Get-MgPrivilegedRolesOverview {
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
-Required Dependencies: Get-AzureADPrivilegedRolesMembers, Get-AzureADDirectoryRole, Get-AzureADDirectoryRoleMember, Get-AzureADGroupMember, Get-AzureADGroupMemberRecursive
+Required Dependencies: Get-MgDirectoryRole, Get-MgDirectoryRoleMemberRecursive
 Optional Dependencies: None
 
 .DESCRIPTION
-Recursively search through privileged roles and return users and service principal identities and their owners
+Recursively search through privileged Microsoft Entra roles and return an overview of the number of users, groups and service principals assigned to each role, including group and service principal owners.
 
 .EXAMPLE
-Get-AzureADPrivilegedObjects
-
+Get-MgPrivilegedRolesOverview
 #>
-	[cmdletbinding()]
-	param(
+    [CmdletBinding()]
+    param()
 
-	)
-	
-    Begin{
-		# Check if Azure AD is loaded
-		If(-not(Get-Command *Get-AzureADCurrentSessionInfo*)){
-			Write-Host -ForegroundColor Red "AzureAD Module not imported, stopping"
-			break
-		}
-        
-		# Check connection with AzureAD
-		try {
-			$var = Get-AzureADTenantDetail
-		}
-		catch {
-			Write-Host -ForegroundColor Red "You're not connected with AzureAD, Connect with Connect-AzureAD"
-			break
-		}
-		
-		$AllUsers = @()
-		$AllServicePrincipals = @()
-		$Output = @()
-    }
-	
-	Process {
-		# Retrieving privileged users member of role
-		$Users = Get-AzureADPrivilegedRolesMembers
-		$AllUsers += $users
-		$UsersCount = ($Users | Measure-Object).count
-		Write-Host "[+] Discovered $UsersCount users"
-		
-		# Retrieving privileged group owners
-		$GroupOwners = Get-AzureADPrivilegedRolesMembers -ReturnGroup | Get-AzureADGroupOwner
-		$AllUsers += $GroupOwners | Where-Object -Property ObjectType -Match User
-		$AllServicePrincipals += $GroupOwners | Where-Object -Property ObjectType -Match ServicePrincipal
-		$CountGroupOwners = ($GroupOwners | Measure-Object).count
-		Write-Host "[+] Discovered $CountGroupOwners group owners"
-		
-		# Retrieving privileged service principals
-		$ServicePrincipals = Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals
-		$AllServicePrincipals += $ServicePrincipals
-		$CountServicePrincipals = ($ServicePrincipals | Measure-Object).count
-		Write-Host "[+] Discovered $CountServicePrincipals service principals"
-		
-		# Retrieving privileged service principal owners
-		$ServicePrincipalOwners = Get-AzureADPrivilegedRolesMembers -ReturnServicePrincipals | Get-AzureADServicePrincipalOwner
-		$AllUsers += $ServicePrincipalOwners
-		$CountServicePrincipalOwners = ($ServicePrincipalOwners | Measure-Object).count
-		Write-Host "[+] Discovered $CountServicePrincipalOwners service principal owners"
-		
-		$CountAllUsers = ($AllUsers | Measure-Object).count
-		Write-Host "[+] Found $CountAllUsers highly privileged users"
-		$CountAllServicePrincipals = ($AllServicePrincipals | Measure-Object).count
-		Write-Host "[+] Found $CountAllServicePrincipals highly privileged service principals"
-		
-		$AllUsers = $AllUsers | Sort-Object -Unique
-		$AllServicePrincipals = $AllServicePrincipals | Sort-Object -Unique
-		
-		$Output += $AllUsers
-		$Output += $AllServicePrincipals
-	}
+    Assert-AzurePowerGraphConnection
+    $Output = @()
+    $ActiveRoles = @(Get-MgDirectoryRole -All -ErrorAction Stop)
 
-	end {
-		return $Output | ft -Force
+    foreach ($AdminRole in (Get-AzurePowerPrivilegedRoleNames -OverviewSubset)) {
+        $AdminRoleData = $ActiveRoles | Where-Object { $_.DisplayName -ieq $AdminRole } | Select-Object -First 1
+        Write-Verbose "Enumerating $($AdminRoleData.DisplayName)"
+
+        if ($null -eq $AdminRoleData) {
+            $Output += [PSCustomObject]@{
+                Role        = $AdminRole
+                UserCount   = 0
+                Users       = @()
+                GroupCount  = 0
+                Groups      = @()
+                GroupOwners = @()
+                SPsCount    = 0
+                SPs         = @()
+                SPsOwners   = @()
+            }
+            continue
+        }
+
+        $Users = @($AdminRoleData | Get-MgDirectoryRoleMemberRecursive | Sort-Object ObjectId -Unique)
+        $Groups = @($AdminRoleData | Get-MgDirectoryRoleMemberRecursive -ReturnGroups | Sort-Object ObjectId -Unique)
+        $ServicePrincipals = @($AdminRoleData | Get-MgDirectoryRoleMemberRecursive -ReturnServicePrincipals | Sort-Object ObjectId -Unique)
+
+        $GroupOwners = @(
+            foreach ($Group in $Groups) {
+                Get-AzurePowerGroupOwners -GroupId $Group.ObjectId
+            }
+        ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+        $ServicePrincipalOwners = @(
+            foreach ($ServicePrincipal in $ServicePrincipals) {
+                Get-AzurePowerServicePrincipalOwners -ServicePrincipalId $ServicePrincipal.ObjectId
+            }
+        ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+        $Output += [PSCustomObject]@{
+            Role        = $AdminRoleData.DisplayName
+            UserCount   = $Users.Count
+            Users       = @($Users.UserPrincipalName | Where-Object { $_ })
+            GroupCount  = $Groups.Count
+            Groups      = @($Groups.DisplayName | Where-Object { $_ })
+            GroupOwners = @($GroupOwners | Get-AzurePowerOwnerLabel)
+            SPsCount    = $ServicePrincipals.Count
+            SPs         = @($ServicePrincipals.DisplayName | Where-Object { $_ })
+            SPsOwners   = @($ServicePrincipalOwners | Get-AzurePowerOwnerLabel)
+        }
     }
+
+    $Output | Sort-Object -Property UserCount -Descending
 }
 
-Function Get-AzureADUserMFAConfiguration{
+function Get-MgDirectoryRoleOverview {
 <#
 .SYNOPSIS
 Author: Jony Schats - 0xjs
-Required Dependencies: Get-MsolUser
+Required Dependencies: Get-MgDirectoryRole, Get-MgDirectoryRoleMemberRecursive
 Optional Dependencies: None
 
 .DESCRIPTION
-Get MFA configuration data for the user. Requires a user as input.
+Recursively search through all active Microsoft Entra directory roles and return an overview of the number of users, groups and service principals assigned to each role, including group and service principal owners.
+
+.EXAMPLE
+Get-MgDirectoryRoleOverview
+#>
+    [CmdletBinding()]
+    param()
+
+    Assert-AzurePowerGraphConnection
+    $Output = @()
+    $ActiveRoles = @(Get-MgDirectoryRole -All -ErrorAction Stop)
+
+    foreach ($RoleData in $ActiveRoles) {
+        Write-Verbose "Enumerating $($RoleData.DisplayName)"
+
+        $Users = @($RoleData | Get-MgDirectoryRoleMemberRecursive | Sort-Object ObjectId -Unique)
+        $Groups = @($RoleData | Get-MgDirectoryRoleMemberRecursive -ReturnGroups | Sort-Object ObjectId -Unique)
+        $ServicePrincipals = @($RoleData | Get-MgDirectoryRoleMemberRecursive -ReturnServicePrincipals | Sort-Object ObjectId -Unique)
+
+        $GroupOwners = @(
+            foreach ($Group in $Groups) {
+                Get-AzurePowerGroupOwners -GroupId $Group.ObjectId
+            }
+        ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+        $ServicePrincipalOwners = @(
+            foreach ($ServicePrincipal in $ServicePrincipals) {
+                Get-AzurePowerServicePrincipalOwners -ServicePrincipalId $ServicePrincipal.ObjectId
+            }
+        ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+        $Output += [PSCustomObject]@{
+            Role        = $RoleData.DisplayName
+            UserCount   = $Users.Count
+            Users       = @($Users.UserPrincipalName | Where-Object { $_ })
+            GroupCount  = $Groups.Count
+            Groups      = @($Groups.DisplayName | Where-Object { $_ })
+            GroupOwners = @($GroupOwners | Get-AzurePowerOwnerLabel)
+            SPsCount    = $ServicePrincipals.Count
+            SPs         = @($ServicePrincipals.DisplayName | Where-Object { $_ })
+            SPsOwners   = @($ServicePrincipalOwners | Get-AzurePowerOwnerLabel)
+        }
+    }
+
+    $Output | Sort-Object -Property UserCount -Descending
+}
+
+function Get-MgPrivilegedObjects {
+<#
+.SYNOPSIS
+Author: Jony Schats - 0xjs
+Required Dependencies: Get-MgPrivilegedRolesMembers, Get-MgDirectoryRole, Get-MgDirectoryRoleMemberRecursive
+Optional Dependencies: None
+
+.DESCRIPTION
+Recursively search through privileged Microsoft Entra roles and return unique users and service principal identities, including the owners of privileged groups and service principals.
+
+.EXAMPLE
+Get-MgPrivilegedObjects
+#>
+    [CmdletBinding()]
+    param()
+
+    Assert-AzurePowerGraphConnection
+
+    $AllUsers = @()
+    $AllServicePrincipals = @()
+
+    $Users = @(Get-MgPrivilegedRolesMembers)
+    $AllUsers += $Users
+    Write-Host "[+] Discovered $($Users.Count) users"
+
+    $Groups = @(Get-MgPrivilegedRolesMembers -ReturnGroups)
+    $GroupOwners = @(
+        foreach ($Group in $Groups) {
+            Get-AzurePowerGroupOwners -GroupId $Group.ObjectId
+        }
+    ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+    $AllUsers += @($GroupOwners | Where-Object { $_.ObjectType -eq 'User' })
+    $AllServicePrincipals += @($GroupOwners | Where-Object { $_.ObjectType -eq 'ServicePrincipal' })
+    Write-Host "[+] Discovered $($GroupOwners.Count) group owners"
+
+    $ServicePrincipals = @(Get-MgPrivilegedRolesMembers -ReturnServicePrincipals)
+    $AllServicePrincipals += $ServicePrincipals
+    Write-Host "[+] Discovered $($ServicePrincipals.Count) service principals"
+
+    $ServicePrincipalOwners = @(
+        foreach ($ServicePrincipal in $ServicePrincipals) {
+            Get-AzurePowerServicePrincipalOwners -ServicePrincipalId $ServicePrincipal.ObjectId
+        }
+    ) | Where-Object { $_ } | Sort-Object ObjectId -Unique
+
+    $AllUsers += @($ServicePrincipalOwners | Where-Object { $_.ObjectType -eq 'User' })
+    $AllServicePrincipals += @($ServicePrincipalOwners | Where-Object { $_.ObjectType -eq 'ServicePrincipal' })
+    Write-Host "[+] Discovered $($ServicePrincipalOwners.Count) service principal owners"
+
+    $AllUsers = @($AllUsers | Where-Object { $_ } | Sort-Object ObjectId -Unique)
+    $AllServicePrincipals = @($AllServicePrincipals | Where-Object { $_ } | Sort-Object ObjectId -Unique)
+
+    Write-Host "[+] Found $($AllUsers.Count) highly privileged users"
+    Write-Host "[+] Found $($AllServicePrincipals.Count) highly privileged service principals"
+
+    $AllUsers
+    $AllServicePrincipals
+}
+
+function Get-MgUserMFAConfiguration {
+<#
+.SYNOPSIS
+Author: Jony Schats - 0xjs
+Required Dependencies: Get-MgUser, Get-MgReportAuthenticationMethodUserRegistrationDetail, Get-MgUserAuthenticationMethod, Invoke-MgGraphRequest
+Optional Dependencies: None
+
+.DESCRIPTION
+Get MFA registration and authentication method information for a Microsoft Entra user. Requires a user from Get-MgUser or Get-MgPrivilegedRolesMembers as input.
+
+The MFA Configured and MFA Capable fields are obtained from the Microsoft Graph userRegistrationDetails report. Detailed authentication method objects are retrieved with Get-MgUserAuthenticationMethod. The legacy per-user MFA state is retrieved from the Microsoft Graph beta authentication requirements endpoint.
+
+.PARAMETER User
+A user object returned by Get-MgUser or Get-MgPrivilegedRolesMembers, or another object containing an Id, ObjectId or UserPrincipalName property.
 
 .PARAMETER Detailed
-If specified will create detailed MFA configuration objects
+Include detailed registered authentication method objects and registered contact information.
 
 .EXAMPLE
-Get-AzureADUser | Get-AzureADUserMFAConfiguration
-Get MFA configuration data of all users
+Get-MgUser -All | Get-MgUserMFAConfiguration
+Get MFA configuration data for all users.
 
 .EXAMPLE
-Get-MsolUser | Get-AzureADUserMFAConfiguration
-Get MFA configuration data of all users
+Get-MgUser -All | Get-MgUserMFAConfiguration -Detailed
+Get detailed MFA configuration data for all users.
 
 .EXAMPLE
-Get-MsolUser | Get-AzureADUserMFAConfiguration -Detailed
-Get detailed MFA configuration data of all users
+Get-MgPrivilegedRolesMembers | Get-MgUserMFAConfiguration
+Get MFA configuration data for all users assigned to privileged roles.
 
 .EXAMPLE
-Get-AzureADPrivilegedRolesMembers | Get-AzureADUserMFAConfiguration
-Get MFA configuration data for all users of privileges roles
-
-.EXAMPLE
-Get-AzureADPrivilegedRolesMembers | Get-AzureADUserMFAConfiguration -Detailed
-Get detailed MFA configuration data for all users of privileges roles
+Get-MgPrivilegedRolesMembers | Get-MgUserMFAConfiguration -Detailed
+Get detailed MFA configuration data for all users assigned to privileged roles.
 #>
-	[OutputType('System.Management.Automation.PSCustomObject')]
-	[cmdletbinding()]
-	param(
-	[parameter(Mandatory=$True,ValueFromPipeline=$true)]
-	$User,
-	[Parameter(Mandatory = $false)]
-	[Switch]
-	$Detailed
-	)
-		Begin{
-			# Check if MSOnline is loaded
-			If(-not(Get-Command *Get-MsolCompanyInformation*)){
-				Write-Host -ForegroundColor Red "MSOnline Module not imported, stopping"
-				break
-			}
-			
-			# Check connection with MSOnline
-			try {
-				$var = Get-MsolDomain -ErrorAction Stop > $null
-			}
-			catch {
-				Write-Host -ForegroundColor Red "You're not connected with MSOnline, Connect with Connect-MsolService"
-				break
-			}
-		
-			$Output = @()
-		}
-		
-		Process {
-			$User = Get-MsolUser -ObjectId $_.ObjectId 
-			
-			$MFADefault = ""
-			$MFAConfigured = ""
-			$MFADefaultMethod = ""
-				
-			$MFADefault = $User.StrongAuthenticationMethods | Where-Object -Property IsDefault -EQ $True | Select-Object -ExpandProperty MethodType
-			
-			if ($User.StrongAuthenticationMethods) {
-				$MFAConfigured = $true
-			}
-			else {
-				$MFAConfigured = $false
-			}
+    [OutputType('System.Management.Automation.PSCustomObject')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        $User,
 
-			if ($MFADefault -eq "PhoneAppNotification") {
-				$MFADefaultMethod = "Microsoft Authenticator"
-			}
-			elseif ($MFADefault -eq "PhoneAppOTP") {
-				$MFADefaultMethod = "HW token / Authenticator"
-			}
-			elseif ($MFADefault -eq "OneWaySMS") {
-				$MFADefaultMethod = "SMS"
-			}
-			elseif ($MFADefault -eq "TwoWayVoiceMobile") {
-				$MFADefaultMethod = "Voice"
-			}
-			
-			$item = New-Object PSObject
-			$item | Add-Member -type NoteProperty -Name 'UserPrincipalName' -Value $User.UserPrincipalName
-			$item | Add-Member -type NoteProperty -Name 'MFA Configured' -Value $MFAConfigured
-			$item | Add-Member -type NoteProperty -Name 'MFA Default' -Value $MFADefaultMethod
-			
-			if ($User.StrongAuthenticationRequirements) {
-					$item | Add-Member -type NoteProperty -Name 'Per-User MFA' -Value $User.StrongAuthenticationRequirements.State
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'Per-User MFA' -Value "-"
-			}
-			
-			if ($Detailed){
-				if ($User.StrongAuthenticationMethods.MethodType -contains "OneWaySMS") {
-				$item | Add-Member -type NoteProperty -Name 'OneWaySMS' -Value $true
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'OneWaySMS' -Value "-"
-				}
-				
-				if ($User.StrongAuthenticationMethods.MethodType -contains "TwoWayVoiceMobile") {
-					$item | Add-Member -type NoteProperty -Name 'TwoWayVoiceMobile' -Value $true
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'TwoWayVoiceMobile' -Value "-"
-				}
-				
-				if ($User.StrongAuthenticationMethods.MethodType -contains "PhoneAppOTP") {
-					$item | Add-Member -type NoteProperty -Name 'PhoneAppOTP' -Value $true
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'PhoneAppOTP' -Value "-"
-				}
-				
-				if ($User.StrongAuthenticationMethods.MethodType -contains "PhoneAppNotification") {
-					$item | Add-Member -type NoteProperty -Name 'PhoneAppNotification' -Value $true
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'PhoneAppNotification' -Value "-"
-				}
-				
-				if ($User.StrongAuthenticationUserDetails.Email) {
-					$item | Add-Member -type NoteProperty -Name 'Registered Email' -Value $User.StrongAuthenticationUserDetails.Email
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'Registered Email' -Value "-"
-				}
-				
-				if ($User.StrongAuthenticationUserDetails.PhoneNumber) {
-					$item | Add-Member -type NoteProperty -Name 'Registered Phone' -Value $User.StrongAuthenticationUserDetails.PhoneNumber
-				} else {
-					$item | Add-Member -type NoteProperty -Name 'Registered Phone' -Value "-"
-				}
-			}
-			
-			$Output += $item
-		}
+        [Parameter(Mandatory = $false)]
+        [switch]$Detailed
+    )
 
-		end {
-			$Output
-		}
+    begin {
+        Assert-AzurePowerGraphConnection
+        $Output = @()
+    }
+
+    process {
+        $UserId = $null
+        try {
+            $UserId = Get-AzurePowerObjectId -InputObject $User
+        }
+        catch {
+            $UserId = Get-AzurePowerPropertyValue -InputObject $User -Name @('UserPrincipalName', 'userPrincipalName')
+        }
+
+        if ([string]::IsNullOrWhiteSpace([string]$UserId)) {
+            throw 'The supplied user object has no Id, ObjectId, or UserPrincipalName property.'
+        }
+
+        $GraphUser = Get-MgUser -UserId $UserId -Property @('Id', 'DisplayName', 'UserPrincipalName', 'AccountEnabled') -ErrorAction Stop
+        $EscapedUserId = [uri]::EscapeDataString([string]$GraphUser.Id)
+
+        try {
+            $Registration = Get-MgReportAuthenticationMethodUserRegistrationDetail `
+                -UserRegistrationDetailsId $GraphUser.Id `
+                -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Could not retrieve MFA registration details for $($GraphUser.UserPrincipalName): $($_.Exception.Message)"
+            $Registration = $null
+        }
+
+        try {
+            $AuthenticationRequirements = Invoke-MgGraphRequest `
+                -Method GET `
+                -Uri "https://graph.microsoft.com/beta/users/$EscapedUserId/authentication/requirements" `
+                -ErrorAction Stop
+        }
+        catch {
+            $AuthenticationRequirements = $null
+        }
+
+        $PreferredMethod = $null
+        if ($null -ne $Registration) {
+            $PreferredMethod = Get-AzurePowerPropertyValue -InputObject $Registration -Name @('UserPreferredMethodForSecondaryAuthentication', 'userPreferredMethodForSecondaryAuthentication')
+        }
+
+        $DefaultMethodMap = @{
+            push                 = 'Microsoft Authenticator notification'
+            oath                 = 'Authenticator code or OATH token'
+            sms                  = 'SMS'
+            voiceMobile          = 'Voice call (mobile)'
+            voiceAlternateMobile = 'Voice call (alternate mobile)'
+            voiceOffice          = 'Voice call (office)'
+            none                 = '-'
+            unknownFutureValue   = 'Unknown'
+        }
+
+        if ($PreferredMethod -and $DefaultMethodMap.ContainsKey([string]$PreferredMethod)) {
+            $MfaDefaultMethod = $DefaultMethodMap[[string]$PreferredMethod]
+        }
+        elseif ($PreferredMethod) {
+            $MfaDefaultMethod = [string]$PreferredMethod
+        }
+        else {
+            $MfaDefaultMethod = '-'
+        }
+
+        $PerUserMfaState = $null
+        if ($null -ne $AuthenticationRequirements) {
+            $PerUserMfaState = Get-AzurePowerPropertyValue -InputObject $AuthenticationRequirements -Name @('perUserMfaState', 'PerUserMfaState')
+        }
+        if (-not $PerUserMfaState) {
+            $PerUserMfaState = '-'
+        }
+
+        $MethodsRegistered = @()
+        $SystemPreferredMethods = @()
+        $IsMfaRegistered = $null
+        $IsMfaCapable = $null
+        $IsPasswordlessCapable = $null
+        $IsSystemPreferredEnabled = $null
+        $MfaReportUpdated = $null
+
+        if ($null -ne $Registration) {
+            $MethodsRegistered = @(Get-AzurePowerPropertyValue -InputObject $Registration -Name @('MethodsRegistered', 'methodsRegistered')) | Where-Object { $_ }
+            $SystemPreferredMethods = @(Get-AzurePowerPropertyValue -InputObject $Registration -Name @('SystemPreferredAuthenticationMethods', 'systemPreferredAuthenticationMethods')) | Where-Object { $_ }
+            $IsMfaRegistered = [bool](Get-AzurePowerPropertyValue -InputObject $Registration -Name @('IsMfaRegistered', 'isMfaRegistered'))
+            $IsMfaCapable = [bool](Get-AzurePowerPropertyValue -InputObject $Registration -Name @('IsMfaCapable', 'isMfaCapable'))
+            $IsPasswordlessCapable = [bool](Get-AzurePowerPropertyValue -InputObject $Registration -Name @('IsPasswordlessCapable', 'isPasswordlessCapable'))
+            $IsSystemPreferredEnabled = [bool](Get-AzurePowerPropertyValue -InputObject $Registration -Name @('IsSystemPreferredAuthenticationMethodEnabled', 'isSystemPreferredAuthenticationMethodEnabled'))
+            $MfaReportUpdated = Get-AzurePowerPropertyValue -InputObject $Registration -Name @('LastUpdatedDateTime', 'lastUpdatedDateTime')
+        }
+
+        # methodsRegistered can also contain SSPR-only methods such as email and
+        # security questions. Keep the complete collection and expose a second,
+        # filtered field for methods that can represent strong authentication.
+        $MfaMethodsRegistered = @(
+            $MethodsRegistered | Where-Object {
+                $_ -notin @('email', 'securityQuestions', 'password')
+            }
+        )
+
+        $Item = [PSCustomObject]@{
+            UserPrincipalName            = $GraphUser.UserPrincipalName
+            AccountEnabled               = $GraphUser.AccountEnabled
+            'MFA Configured'             = $IsMfaRegistered
+            'MFA Capable'                = $IsMfaCapable
+            'MFA Methods'                = if ($IsMfaRegistered -and $MfaMethodsRegistered.Count -gt 0) { $MfaMethodsRegistered -join ', ' } else { '-' }
+            'Registered Methods'         = if ($MethodsRegistered.Count -gt 0) { $MethodsRegistered -join ', ' } else { '-' }
+            'MFA Default'                = $MfaDefaultMethod
+            'System Preferred Enabled'   = $IsSystemPreferredEnabled
+            'System Preferred Methods'   = if ($SystemPreferredMethods.Count -gt 0) { $SystemPreferredMethods -join ', ' } else { '-' }
+            'Passwordless Capable'       = $IsPasswordlessCapable
+            'Per-User MFA'               = [string]$PerUserMfaState
+            'MFA Report Updated'         = $MfaReportUpdated
+        }
+
+        if ($Detailed) {
+            try {
+                $Methods = @(Get-MgUserAuthenticationMethod -UserId $GraphUser.Id -All -ErrorAction Stop)
+            }
+            catch {
+                Write-Warning "Could not retrieve detailed authentication methods for $($GraphUser.UserPrincipalName): $($_.Exception.Message)"
+                $Methods = @()
+            }
+
+            $MethodTypes = @(
+                foreach ($Method in $Methods) {
+                    Get-AzurePowerPropertyValue -InputObject $Method -Name @('@odata.type', 'ODataType')
+                }
+            ) | Where-Object { $_ }
+
+            $PhoneMethods = @($Methods | Where-Object {
+                (Get-AzurePowerPropertyValue -InputObject $_ -Name @('@odata.type', 'ODataType')) -eq '#microsoft.graph.phoneAuthenticationMethod'
+            })
+
+            $EmailMethod = $Methods | Where-Object {
+                (Get-AzurePowerPropertyValue -InputObject $_ -Name @('@odata.type', 'ODataType')) -eq '#microsoft.graph.emailAuthenticationMethod'
+            } | Select-Object -First 1
+
+            $ReadableMethodTypes = @($MethodTypes | ForEach-Object {
+                $_ -replace '^#microsoft\.graph\.', '' -replace 'AuthenticationMethod$', ''
+            })
+
+            $RegisteredPhoneNumbers = @(
+                foreach ($PhoneMethod in $PhoneMethods) {
+                    Get-AzurePowerPropertyValue -InputObject $PhoneMethod -Name @('PhoneNumber', 'phoneNumber')
+                }
+            ) | Where-Object { $_ }
+
+            $RegisteredEmail = $null
+            if ($EmailMethod) {
+                $RegisteredEmail = Get-AzurePowerPropertyValue -InputObject $EmailMethod -Name @('EmailAddress', 'emailAddress')
+            }
+
+            $HasMobilePhone = $false
+            foreach ($PhoneMethod in $PhoneMethods) {
+                $PhoneType = Get-AzurePowerPropertyValue -InputObject $PhoneMethod -Name @('PhoneType', 'phoneType')
+                if ($PhoneType -eq 'mobile') {
+                    $HasMobilePhone = $true
+                }
+            }
+
+            $PreferredAndSystemMethods = @($PreferredMethod) + @($SystemPreferredMethods)
+            $HasSmsPreference = $PreferredAndSystemMethods -contains 'sms'
+            $HasVoiceMobilePreference = $PreferredAndSystemMethods -contains 'voiceMobile'
+            $HasPhoneAppOtp = ($MethodsRegistered -contains 'softwareOneTimePasscode') -or ($MethodsRegistered -contains 'hardwareOneTimePasscode')
+            $HasPhoneAppNotification = $MethodsRegistered -contains 'microsoftAuthenticatorPush'
+
+            $Item | Add-Member -NotePropertyName 'Authentication Method Objects' -NotePropertyValue $(if ($ReadableMethodTypes) { $ReadableMethodTypes -join ', ' } else { '-' })
+            $Item | Add-Member -NotePropertyName MobilePhoneRegistered -NotePropertyValue $(if ($HasMobilePhone) { $true } else { '-' })
+            $Item | Add-Member -NotePropertyName OneWaySMS -NotePropertyValue $(if ($HasSmsPreference) { $true } elseif ($HasMobilePhone) { 'Policy-dependent' } else { '-' })
+            $Item | Add-Member -NotePropertyName TwoWayVoiceMobile -NotePropertyValue $(if ($HasVoiceMobilePreference) { $true } elseif ($HasMobilePhone) { 'Policy-dependent' } else { '-' })
+            $Item | Add-Member -NotePropertyName PhoneAppOTP -NotePropertyValue $(if ($HasPhoneAppOtp) { $true } else { '-' })
+            $Item | Add-Member -NotePropertyName PhoneAppNotification -NotePropertyValue $(if ($HasPhoneAppNotification) { $true } else { '-' })
+            $Item | Add-Member -NotePropertyName 'Registered Email' -NotePropertyValue $(if ($RegisteredEmail) { $RegisteredEmail } else { '-' })
+            $Item | Add-Member -NotePropertyName 'Registered Phone' -NotePropertyValue $(if ($RegisteredPhoneNumbers) { $RegisteredPhoneNumbers -join ', ' } else { '-' })
+            $Item | Add-Member -NotePropertyName FIDO2 -NotePropertyValue $(if ($MethodTypes -contains '#microsoft.graph.fido2AuthenticationMethod') { $true } else { '-' })
+            $Item | Add-Member -NotePropertyName WindowsHelloForBusiness -NotePropertyValue $(if ($MethodTypes -contains '#microsoft.graph.windowsHelloForBusinessAuthenticationMethod') { $true } else { '-' })
+            $Item | Add-Member -NotePropertyName TemporaryAccessPass -NotePropertyValue $(if ($MethodTypes -contains '#microsoft.graph.temporaryAccessPassAuthenticationMethod') { $true } else { '-' })
+        }
+
+        $Output += $Item
+    }
+
+    end {
+        $Output
+    }
+}
+
+# When imported as a script module, expose only the public Microsoft Graph commands.
+if ($null -ne $ExecutionContext.SessionState.Module) {
+    Export-ModuleMember -Function @(
+        'Get-MgGroupMemberRecursive',
+        'Get-MgDirectoryRoleMemberRecursive',
+        'Get-MgPrivilegedRolesMembers',
+        'Get-MgPrivilegedRolesOverview',
+        'Get-MgDirectoryRoleOverview',
+        'Get-MgPrivilegedObjects',
+        'Get-MgUserMFAConfiguration'
+    )
 }
